@@ -59,9 +59,7 @@ export async function POST(request: NextRequest) {
         vmCreated: false,
         repoCreated: false,
         repoCloned: false,
-        browserUseInstalled: false,
         gitSyncConfigured: false,
-        ralphWiggumSetup: false,
         errorMessage: null,
       },
     })

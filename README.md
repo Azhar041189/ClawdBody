@@ -28,8 +28,7 @@ Samantha is an autonomous AI agent with **persistent memory**, **intelligent rea
 |-----------|------|------------|
 | **Memory** | Persistent knowledge base | Obsidian Vault + GitHub |
 | **Mind** | Reasoning & decision making | Claude Code (terminal-based) |
-| **Hands** | Browser & computer control | browser-use + Orgo APIs |
-| **Ralph Wiggum** | Long-running task manager | Python daemon |
+| **Hands** | Browser & computer control | Orgo APIs |
 
 ### Task Priority System
 
@@ -131,9 +130,7 @@ Visit `http://localhost:3000` and sign in with GitHub.
 4. **Vault Creation** - Creates a private GitHub repo with vault template
 5. **VM Configuration**:
    - Clones vault repo to VM
-   - Installs browser-use for browser automation
    - Sets up Git sync (auto-pulls from GitHub)
-   - Deploys Ralph Wiggum task manager
 
 ## Gmail Integration
 
@@ -200,7 +197,6 @@ Edit `tasks.md` in your vault repository:
 
 - **VM Console**: View at your Orgo dashboard
 - **Vault Repo**: Check GitHub for synced changes
-- **Ralph Wiggum Logs**: `~/ralph_wiggum.log` on the VM
 
 ## Development
 
@@ -220,10 +216,6 @@ npm start
 ### Orgo API
 - [Documentation](https://docs.orgo.ai)
 - Endpoints for VM management, bash execution, screenshots
-
-### browser-use
-- [Documentation](https://docs.browser-use.com)
-- Python library for AI-driven browser automation
 
 ## License
 

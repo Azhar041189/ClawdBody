@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useSession, signOut } from 'next-auth/react'
 import { motion } from 'framer-motion'
-import { Mail, Calendar, MessageSquare, FileText, MessageCircle, Bot, Video, Phone, Loader2, RefreshCw, Check, Key, AlertCircle, ArrowRight, ExternalLink, LogOut, Github, X, Server, GitBranch, Terminal, CheckCircle2, ChevronDown, ChevronUp, Trash2 } from 'lucide-react'
+import { Mail, Calendar, MessageSquare, FileText, MessageCircle, Bot, Video, Phone, Loader2, RefreshCw, Check, Key, AlertCircle, ArrowRight, ExternalLink, LogOut, Github, X, Server, GitBranch, Terminal, CheckCircle2, ChevronDown, ChevronUp, Trash2, XCircle } from 'lucide-react'
 
 interface Connector {
   id: string
@@ -103,9 +103,10 @@ interface SetupStatus {
   vmCreated: boolean
   repoCreated: boolean
   repoCloned: boolean
-  browserUseInstalled: boolean
   gitSyncConfigured: boolean
-  ralphWiggumSetup: boolean
+  clawdbotInstalled?: boolean
+  telegramConfigured?: boolean
+  gatewayStarted?: boolean
   orgoComputerId?: string
   orgoComputerUrl?: string
   vaultRepoUrl?: string
@@ -117,6 +118,8 @@ export default function LearningSourcesPage() {
   const searchParams = useSearchParams()
   const [refreshKey, setRefreshKey] = useState(0)
   const [claudeApiKey, setClaudeApiKey] = useState('')
+  const [telegramBotToken, setTelegramBotToken] = useState('')
+  const [telegramUserId, setTelegramUserId] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [setupError, setSetupError] = useState<string | null>(null)
   const [showSetupProgress, setShowSetupProgress] = useState(false)
@@ -256,14 +259,8 @@ export default function LearningSourcesPage() {
               if (status.repoCloned && !prevStatus.repoCloned) {
                 addLog('success', 'Vault repository cloned to VM')
               }
-              if (status.browserUseInstalled && !prevStatus.browserUseInstalled) {
-                addLog('success', 'Browser-use installed')
-              }
               if (status.gitSyncConfigured && !prevStatus.gitSyncConfigured) {
                 addLog('success', 'Git sync configured')
-              }
-              if (status.ralphWiggumSetup && !prevStatus.ralphWiggumSetup) {
-                addLog('success', 'Ralph Wiggum (Samantha Task Executor) setup complete')
               }
             }
 
@@ -313,7 +310,11 @@ export default function LearningSourcesPage() {
       const res = await fetch('/api/setup/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ claudeApiKey })
+        body: JSON.stringify({ 
+          claudeApiKey,
+          telegramBotToken: telegramBotToken.trim() || undefined,
+          telegramUserId: telegramUserId.trim() || undefined,
+        })
       })
 
       if (!res.ok) {
@@ -393,6 +394,14 @@ export default function LearningSourcesPage() {
           ) : setupStatus?.status === 'ready' && setupStatus?.orgoComputerId ? (
             <ComputerConnectedView 
               setupStatus={setupStatus}
+              onStatusUpdate={async () => {
+                // Refresh status
+                const res = await fetch('/api/setup/status')
+                if (res.ok) {
+                  const newStatus = await res.json()
+                  setSetupStatus(newStatus)
+                }
+              }}
               onDelete={async () => {
                 try {
                   const res = await fetch('/api/setup/delete-computer', {
@@ -433,7 +442,7 @@ export default function LearningSourcesPage() {
               <div className="space-y-6">
                 <div>
                   <label className="block text-sm font-mono text-sam-text-dim mb-2">
-                    Claude API Key
+                    Claude API Key <span className="text-sam-error">*</span>
                   </label>
                   <div className="relative">
                     <input
@@ -454,6 +463,44 @@ export default function LearningSourcesPage() {
                     <ExternalLink className="w-3 h-3" />
                   </a>
                 </div>
+
+                <div>
+                  <label className="block text-sm font-mono text-sam-text-dim mb-2">
+                    Telegram Bot Token <span className="text-sam-text-dim text-xs">(Optional)</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="password"
+                      value={telegramBotToken}
+                      onChange={(e) => setTelegramBotToken(e.target.value)}
+                      placeholder="1234567890:ABCdefGHIjklMNOpqrsTUVwxyz"
+                      className="w-full px-4 py-3 rounded-lg bg-sam-bg border border-sam-border focus:border-sam-accent outline-none font-mono text-sm transition-colors"
+                    />
+                  </div>
+                  <p className="mt-2 text-xs text-sam-text-dim">
+                    Get your bot token from <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer" className="text-sam-accent hover:underline">@BotFather</a> on Telegram
+                  </p>
+                </div>
+
+                {telegramBotToken.trim() && (
+                  <div>
+                    <label className="block text-sm font-mono text-sam-text-dim mb-2">
+                      Telegram User ID <span className="text-sam-text-dim text-xs">(Optional - for allowlist)</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={telegramUserId}
+                        onChange={(e) => setTelegramUserId(e.target.value)}
+                        placeholder="123456789"
+                        className="w-full px-4 py-3 rounded-lg bg-sam-bg border border-sam-border focus:border-sam-accent outline-none font-mono text-sm transition-colors"
+                      />
+                    </div>
+                    <p className="mt-2 text-xs text-sam-text-dim">
+                      Your Telegram user ID. Get it from <a href="https://t.me/userinfobot" target="_blank" rel="noopener noreferrer" className="text-sam-accent hover:underline">@userinfobot</a>
+                    </p>
+                  </div>
+                )}
               </div>
 
               <button
@@ -973,13 +1020,11 @@ function SetupProgressView({
       id: 'configuring_vm', 
       label: 'Configuring VM', 
       icon: Terminal,
-      check: () => setupStatus?.ralphWiggumSetup || false,
-      active: () => setupStatus?.status === 'configuring_vm' || (setupStatus?.status === 'ready' && !setupStatus?.ralphWiggumSetup),
+      check: () => setupStatus?.status === 'ready',
+      active: () => setupStatus?.status === 'configuring_vm',
       subSteps: [
         { label: 'Clone repository', check: () => setupStatus?.repoCloned || false },
-        { label: 'Install browser-use', check: () => setupStatus?.browserUseInstalled || false },
         { label: 'Configure Git sync', check: () => setupStatus?.gitSyncConfigured || false },
-        { label: 'Setup Ralph Wiggum', check: () => setupStatus?.ralphWiggumSetup || false },
       ]
     },
     { 
@@ -999,7 +1044,7 @@ function SetupProgressView({
 
   const currentStepIndex = steps.findIndex(s => s.active())
   const progressPercentage = currentStepIndex >= 0 
-    ? ((currentStepIndex + (setupStatus?.ralphWiggumSetup ? 1 : 0.5)) / steps.length) * 100
+    ? ((currentStepIndex + 1) / steps.length) * 100
     : setupStatus?.status === 'ready' ? 100 : 0
 
   return (
@@ -1241,13 +1286,24 @@ function SetupProgressView({
 
 function ComputerConnectedView({ 
   setupStatus, 
+  onStatusUpdate,
   onDelete 
 }: { 
   setupStatus: SetupStatus
+  onStatusUpdate?: () => Promise<void>
   onDelete: () => Promise<void>
 }) {
   const [isDeleting, setIsDeleting] = useState(false)
   const [currentScreenshot, setCurrentScreenshot] = useState<string | null>(null)
+  const [showTelegramConfig, setShowTelegramConfig] = useState(false)
+  const [telegramBotToken, setTelegramBotToken] = useState('')
+  const [telegramUserId, setTelegramUserId] = useState('')
+  const [isConfiguringTelegram, setIsConfiguringTelegram] = useState(false)
+  const [telegramError, setTelegramError] = useState<string | null>(null)
+  const [gatewayStatus, setGatewayStatus] = useState<any>(null)
+  const [isCheckingGateway, setIsCheckingGateway] = useState(false)
+  const [isStartingGateway, setIsStartingGateway] = useState(false)
+  const [showGatewayLogs, setShowGatewayLogs] = useState(false)
 
   // Poll for screenshots continuously
   useEffect(() => {
@@ -1454,18 +1510,137 @@ function ComputerConnectedView({
             </div>
             <div className="flex items-center gap-2 text-xs">
               <CheckCircle2 className="w-3 h-3 text-green-500 flex-shrink-0" />
-              <span className="text-sam-text-dim">Browser-use Installed</span>
-            </div>
-            <div className="flex items-center gap-2 text-xs">
-              <CheckCircle2 className="w-3 h-3 text-green-500 flex-shrink-0" />
               <span className="text-sam-text-dim">Git Sync Configured</span>
             </div>
             <div className="flex items-center gap-2 text-xs">
-              <CheckCircle2 className="w-3 h-3 text-green-500 flex-shrink-0" />
-              <span className="text-sam-text-dim">Task Executor Running</span>
+              {setupStatus.telegramConfigured && setupStatus.gatewayStarted ? (
+                <CheckCircle2 className="w-3 h-3 text-green-500 flex-shrink-0" />
+              ) : (
+                <XCircle className="w-3 h-3 text-sam-text-dim flex-shrink-0" />
+              )}
+              <span className={setupStatus.telegramConfigured && setupStatus.gatewayStarted ? 'text-sam-text-dim' : 'text-sam-text-dim'}>
+                Telegram {setupStatus.telegramConfigured && setupStatus.gatewayStarted ? 'Connected' : 'Not Configured'}
+              </span>
             </div>
           </div>
         </div>
+
+        {/* Telegram Configuration */}
+        {!setupStatus.telegramConfigured ? (
+          <div className="mb-4 p-4 rounded-lg border border-sam-border bg-sam-surface/30">
+            {!showTelegramConfig ? (
+              <button
+                onClick={() => setShowTelegramConfig(true)}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg border border-sam-accent text-sam-accent hover:bg-sam-accent/10 transition-all font-display font-medium text-sm"
+              >
+                <MessageCircle className="w-4 h-4" />
+                Configure Telegram
+              </button>
+            ) : (
+              <div className="space-y-3">
+                <h4 className="text-sm font-display font-semibold text-sam-text mb-2">Configure Telegram</h4>
+                {telegramError && (
+                  <div className="p-2 rounded bg-sam-error/10 border border-sam-error/30 text-sam-error text-xs">
+                    {telegramError}
+                  </div>
+                )}
+                <div>
+                  <label className="block text-xs font-mono text-sam-text-dim mb-1">
+                    Bot Token <span className="text-sam-error">*</span>
+                  </label>
+                  <input
+                    type="password"
+                    value={telegramBotToken}
+                    onChange={(e) => setTelegramBotToken(e.target.value)}
+                    placeholder="1234567890:ABCdef..."
+                    className="w-full px-3 py-2 rounded-lg bg-sam-bg border border-sam-border focus:border-sam-accent outline-none font-mono text-xs transition-colors"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-mono text-sam-text-dim mb-1">
+                    User ID <span className="text-sam-text-dim text-xs">(Optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={telegramUserId}
+                    onChange={(e) => setTelegramUserId(e.target.value)}
+                    placeholder="123456789"
+                    className="w-full px-3 py-2 rounded-lg bg-sam-bg border border-sam-border focus:border-sam-accent outline-none font-mono text-xs transition-colors"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={async () => {
+                      if (!telegramBotToken.trim()) {
+                        setTelegramError('Bot token is required')
+                        return
+                      }
+                      setIsConfiguringTelegram(true)
+                      setTelegramError(null)
+                      try {
+                        const res = await fetch('/api/setup/configure-telegram', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            telegramBotToken: telegramBotToken.trim(),
+                            telegramUserId: telegramUserId.trim() || undefined,
+                          }),
+                        })
+                        if (!res.ok) {
+                          const data = await res.json()
+                          throw new Error(data.error || 'Failed to configure Telegram')
+                        }
+                        const data = await res.json()
+                        setShowTelegramConfig(false)
+                        setTelegramBotToken('')
+                        setTelegramUserId('')
+                        // Refresh status
+                        if (onStatusUpdate) {
+                          await onStatusUpdate()
+                        } else {
+                          window.location.reload()
+                        }
+                      } catch (error) {
+                        setTelegramError(error instanceof Error ? error.message : 'Failed to configure Telegram')
+                      } finally {
+                        setIsConfiguringTelegram(false)
+                      }
+                    }}
+                    disabled={isConfiguringTelegram || !telegramBotToken.trim()}
+                    className="flex-1 px-3 py-2 rounded-lg bg-sam-accent text-sam-bg hover:bg-sam-accent-dim disabled:opacity-50 disabled:cursor-not-allowed transition-all font-display font-medium text-xs flex items-center justify-center gap-2"
+                  >
+                    {isConfiguringTelegram ? (
+                      <>
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        Configuring...
+                      </>
+                    ) : (
+                      'Configure'
+                    )}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowTelegramConfig(false)
+                      setTelegramBotToken('')
+                      setTelegramUserId('')
+                      setTelegramError(null)
+                    }}
+                    className="px-3 py-2 rounded-lg border border-sam-border text-sam-text-dim hover:border-sam-error/50 hover:text-sam-error transition-all font-display font-medium text-xs"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="mb-4 p-3 rounded-lg border border-green-500/30 bg-green-500/10">
+            <div className="flex items-center gap-2 text-xs text-green-500">
+              <CheckCircle2 className="w-4 h-4" />
+              <span>Telegram connected and gateway running</span>
+            </div>
+          </div>
+        )}
 
         <button
           onClick={handleDelete}

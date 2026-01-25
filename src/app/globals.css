@@ -11,6 +11,52 @@ body {
   min-height: 100vh;
 }
 
+/* Landing page specific - dark space theme */
+body:has(.landing-page-container) {
+  background: radial-gradient(circle at 18% 18%, rgba(120, 20, 35, 0.35), transparent 42%),
+    radial-gradient(circle at 82% 38%, rgba(10, 70, 85, 0.35), transparent 48%),
+    radial-gradient(circle at 50% 80%, rgba(8, 10, 20, 0.55), transparent 55%),
+    linear-gradient(180deg, #0b0b12 0%, #0b0c13 45%, #0a0b12 100%);
+}
+
+.landing-nebula {
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(ellipse 80% 50% at 20% 20%, rgba(255, 77, 77, 0.12), transparent 50%),
+    radial-gradient(ellipse 60% 60% at 80% 30%, rgba(0, 229, 204, 0.08), transparent 50%),
+    radial-gradient(ellipse 90% 70% at 50% 90%, rgba(255, 77, 77, 0.06), transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.landing-stars {
+  position: fixed;
+  inset: 0;
+  background-image: radial-gradient(2px 2px at 20px 30px, rgba(255, 255, 255, 0.8), transparent),
+    radial-gradient(2px 2px at 40px 70px, rgba(255, 255, 255, 0.5), transparent),
+    radial-gradient(1px 1px at 90px 40px, rgba(255, 255, 255, 0.6), transparent),
+    radial-gradient(2px 2px at 130px 80px, rgba(255, 255, 255, 0.4), transparent),
+    radial-gradient(1px 1px at 160px 120px, rgba(255, 255, 255, 0.7), transparent),
+    radial-gradient(2px 2px at 200px 60px, rgba(0, 229, 204, 0.6), transparent),
+    radial-gradient(1px 1px at 250px 150px, rgba(255, 255, 255, 0.5), transparent),
+    radial-gradient(2px 2px at 300px 40px, rgba(255, 77, 77, 0.4), transparent);
+  background-size: 350px 200px;
+  animation: landing-twinkle 8s ease-in-out infinite alternate;
+  pointer-events: none;
+  z-index: 0;
+}
+
+@keyframes landing-twinkle {
+  0% {
+    opacity: 0.35;
+    filter: blur(0.2px);
+  }
+  100% {
+    opacity: 0.85;
+    filter: blur(0px);
+  }
+}
+
 /* Glow effects - warm orange glow inspired by "Her" */
 .glow-accent {
   box-shadow: 0 0 30px rgba(255, 107, 53, 0.2);

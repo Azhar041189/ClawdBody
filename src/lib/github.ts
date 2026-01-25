@@ -511,12 +511,6 @@ You can control the VM through:
 - Keyboard input - Type and use shortcuts
 - Bash commands - Full terminal access
 
-### Browser Use
-For web tasks (research, booking, form filling):
-- Uses browser-use library
-- Can navigate websites autonomously
-- Fill forms, extract data, search
-
 ### File Operations
 - Read/write any file in the vault
 - Create new notes, update context
@@ -553,7 +547,7 @@ For web tasks (research, booking, form filling):
 
 ## When Blocked
 
-1. Research the problem (browser-use, web search)
+1. Research the problem (web search, GUI exploration)
 2. Check vault for relevant context
 3. Try alternative approaches
 4. If truly stuck: Document + partial solution + next steps

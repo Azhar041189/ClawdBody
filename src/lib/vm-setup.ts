@@ -157,15 +157,44 @@ export class VMSetup {
 
   /**
    * Clone the vault repository
+   * Note: Symlink to knowledge directory is created later after Clawdbot directories exist
    */
   async cloneVaultRepo(sshUrl: string): Promise<boolean> {
-    // Create vault directory and clone
+    // Clone vault repository to ~/vault
     const result = await this.runCommand(
       `rm -rf ~/vault && git clone ${sshUrl} ~/vault`,
       'Clone vault repository'
     )
-    
+
     return result.success
+  }
+
+  /**
+   * Link the vault to Clawdbot's knowledge directory
+   * Should be called after Clawdbot directories are created
+   */
+  async linkVaultToKnowledge(): Promise<boolean> {
+    // Ensure Clawdbot knowledge directory exists
+    await this.runCommand(
+      'mkdir -p /home/user/clawd/knowledge',
+      'Create Clawdbot knowledge directory'
+    )
+
+    // Symlink vault to Clawdbot knowledge directory
+    const linkResult = await this.runCommand(
+      'ln -sf ~/vault /home/user/clawd/knowledge/vault',
+      'Link vault to Clawdbot knowledge'
+    )
+
+    if (linkResult.success) {
+      this.onProgress?.({
+        step: 'Link vault',
+        message: 'Vault linked to /home/user/clawd/knowledge/vault',
+        success: true,
+      })
+    }
+
+    return linkResult.success
   }
 
   /**
@@ -196,6 +225,37 @@ export class VMSetup {
       success: errors.length === 0,
       errors: errors.length > 0 ? errors : undefined,
     }
+  }
+
+  /**
+   * Set up knowledge directories for Clawdbot
+   * Symlinks cloned repositories into the Clawdbot workspace for context
+   */
+  async setupClawdbotKnowledge(repoNames: string[]): Promise<boolean> {
+    const workspaceDir = '/home/user/clawd'
+    const reposDir = '~/repositories'
+
+    // Ensure workspace exists
+    await this.runCommand(`mkdir -p ${workspaceDir}/knowledge`, 'Create knowledge directory')
+
+    for (const repoName of repoNames) {
+      const result = await this.runCommand(
+        `ln -sf ${reposDir}/${repoName} ${workspaceDir}/knowledge/${repoName}`,
+        `Link ${repoName} to Clawdbot workspace`
+      )
+
+      if (!result.success) {
+        console.warn(`Failed to link ${repoName}:`, result.output)
+      }
+    }
+
+    this.onProgress?.({
+      step: 'Knowledge Setup',
+      message: `Linked ${repoNames.length} repositories to Clawdbot workspace`,
+      success: true,
+    })
+
+    return true
   }
 
   /**
@@ -297,92 +357,497 @@ export class VMSetup {
   }
 
   /**
-   * Install browser-use library
-   * Docs: https://docs.browser-use.com
-   * Note: Uses background execution due to Orgo's 30s timeout
+   * Install NVM, Node.js 22, and Clawdbot
+   * Clawdbot is a chat gateway connecting messaging platforms to Claude AI
+   * Docs: https://docs.clawd.bot/llms-full.txt
    */
-  async installBrowserUse(): Promise<boolean> {
-    // Create a script that does all the installation
-    const installScript = `#!/bin/bash
-set -e
-echo "Starting browser-use installation..." > /tmp/browser-use-install.log
+  async installClawdbot(): Promise<{ success: boolean; version?: string }> {
+    // Update system packages
+    this.onProgress?.({
+      step: 'Install Clawdbot',
+      message: 'Updating system packages...',
+      success: true,
+    })
 
-# Create virtual environment
-python3 -m venv ~/browser-use-env 2>&1 | tee -a /tmp/browser-use-install.log
-
-# Install browser-use and playwright
-~/browser-use-env/bin/pip install browser-use playwright 2>&1 | tee -a /tmp/browser-use-install.log
-
-# Install chromium browser
-~/browser-use-env/bin/playwright install chromium 2>&1 | tee -a /tmp/browser-use-install.log
-
-# Install system dependencies
-sudo ~/browser-use-env/bin/playwright install-deps chromium 2>&1 | tee -a /tmp/browser-use-install.log
-
-echo "INSTALL_COMPLETE" >> /tmp/browser-use-install.log
-`
-
-    // Write the install script
-    const writeScript = await this.runCommand(
-      `cat > /tmp/install-browser-use.sh << 'SCRIPT_EOF'
-${installScript}
-SCRIPT_EOF
-chmod +x /tmp/install-browser-use.sh`,
-      'Create browser-use install script'
+    await this.runCommand(
+      'sudo apt-get update -qq',
+      'Update system packages'
     )
 
-    if (!writeScript.success) {
-      return false
+    // Install dependencies (git, curl required for NVM)
+    this.onProgress?.({
+      step: 'Install Clawdbot',
+      message: 'Installing dependencies...',
+      success: true,
+    })
+
+    const depsInstall = await this.runCommand(
+      'sudo apt-get install -y git curl',
+      'Install git and curl'
+    )
+
+    if (!depsInstall.success) {
+      console.error('Failed to install dependencies:', depsInstall.output)
+      return { success: false }
     }
 
-    // Run the script in the background
-    await this.runCommand(
-      'nohup /tmp/install-browser-use.sh > /tmp/browser-use-install-out.log 2>&1 &',
-      'Start browser-use installation (background)'
+    // Install NVM
+    this.onProgress?.({
+      step: 'Install Clawdbot',
+      message: 'Installing NVM...',
+      success: true,
+    })
+
+    const nvmInstall = await this.runCommand(
+      'curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.0/install.sh | bash',
+      'Install NVM'
     )
 
-    // Poll for completion (check every 10 seconds, up to 5 minutes)
-    const maxAttempts = 30
+    if (!nvmInstall.success) {
+      console.error('Failed to install NVM:', nvmInstall.output)
+      return { success: false }
+    }
+
+    // Install Node.js 22
+    this.onProgress?.({
+      step: 'Install Clawdbot',
+      message: 'Installing Node.js 22...',
+      success: true,
+    })
+
+    const nodeInstall = await this.runCommand(
+      'export NVM_DIR="$HOME/.nvm" && [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && nvm install 22 && nvm alias default 22',
+      'Install Node.js 22'
+    )
+
+    if (!nodeInstall.success) {
+      console.error('Failed to install Node.js:', nodeInstall.output)
+      return { success: false }
+    }
+
+    // Verify Node.js
+    const nodeVersion = await this.runCommand(
+      'export NVM_DIR="$HOME/.nvm" && [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && node -v',
+      'Verify Node.js'
+    )
+
+    this.onProgress?.({
+      step: 'Install Clawdbot',
+      message: `Node.js installed: ${nodeVersion.output.trim()}`,
+      success: true,
+    })
+
+    // Install Clawdbot globally (run in background due to Orgo API timeout)
+    this.onProgress?.({
+      step: 'Install Clawdbot',
+      message: 'Installing Clawdbot (this may take a few minutes)...',
+      success: true,
+    })
+
+    // Create install script that runs in background
+    const installScript = `#!/bin/bash
+set -e
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+echo "Starting Clawdbot installation..." > /tmp/clawdbot-install.log
+npm install -g clawdbot@latest >> /tmp/clawdbot-install.log 2>&1
+echo "INSTALL_COMPLETE" >> /tmp/clawdbot-install.log
+`
+
+    // Write and execute install script in background
+    const scriptB64 = Buffer.from(installScript).toString('base64')
+    await this.runCommand(
+      `echo '${scriptB64}' | base64 -d > /tmp/install-clawdbot.sh && chmod +x /tmp/install-clawdbot.sh`,
+      'Create Clawdbot install script'
+    )
+
+    await this.runCommand(
+      'nohup /tmp/install-clawdbot.sh > /tmp/clawdbot-install-out.log 2>&1 &',
+      'Start Clawdbot installation (background)'
+    )
+
+    // Poll for completion (check every 10 seconds, up to 10 minutes)
+    const maxAttempts = 60
     const intervalMs = 10000
 
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise(resolve => setTimeout(resolve, intervalMs))
-      
+
+      // Check if install completed
       const checkResult = await this.runCommand(
-        'grep -q "INSTALL_COMPLETE" /tmp/browser-use-install.log 2>/dev/null && echo "DONE" || echo "PENDING"',
-        'Check browser-use installation progress'
+        'grep -q "INSTALL_COMPLETE" /tmp/clawdbot-install.log 2>/dev/null && echo "DONE" || echo "PENDING"',
+        'Check Clawdbot installation progress'
       )
 
       if (checkResult.output.trim() === 'DONE') {
-        this.onProgress?.({
-          step: 'Install browser-use',
-          message: 'browser-use installation completed',
-          success: true,
-        })
-        
-        // Verify installation
-        const verify = await this.runCommand(
-          '~/browser-use-env/bin/python -c "import browser_use; print(\'browser-use installed\')"',
-          'Verify browser-use'
-        )
-        return verify.success
+        break
       }
 
       this.onProgress?.({
-        step: 'Install browser-use',
-        message: `Installing browser-use... (${i + 1}/${maxAttempts})`,
+        step: 'Install Clawdbot',
+        message: `Installing Clawdbot... (${i + 1}/${maxAttempts})`,
         success: true,
       })
+
+      if (i === maxAttempts - 1) {
+        // Check if npm is still running before giving up
+        const npmRunning = await this.runCommand(
+          'pgrep -f "npm install" > /dev/null && echo "RUNNING" || echo "NOT_RUNNING"',
+          'Check if npm is still running'
+        )
+
+        if (npmRunning.output.includes('RUNNING')) {
+          // npm is still running, give it more time (another 5 minutes)
+          console.log('npm still running, extending timeout...')
+          this.onProgress?.({
+            step: 'Install Clawdbot',
+            message: 'npm still installing, extending timeout...',
+            success: true,
+          })
+
+          // Wait another 30 attempts (5 more minutes)
+          for (let j = 0; j < 30; j++) {
+            await new Promise(resolve => setTimeout(resolve, intervalMs))
+
+            const extendedCheck = await this.runCommand(
+              'grep -q "INSTALL_COMPLETE" /tmp/clawdbot-install.log 2>/dev/null && echo "DONE" || echo "PENDING"',
+              'Check Clawdbot installation progress (extended)'
+            )
+
+            if (extendedCheck.output.trim() === 'DONE') {
+              break
+            }
+
+            if (j === 29) {
+              const logResult = await this.runCommand(
+                'tail -30 /tmp/clawdbot-install.log',
+                'Get Clawdbot install log'
+              )
+              console.error('Clawdbot installation timed out (extended). Last log:', logResult.output)
+              return { success: false }
+            }
+          }
+        } else {
+          // npm is not running, check log for errors
+          const logResult = await this.runCommand(
+            'tail -30 /tmp/clawdbot-install.log',
+            'Get Clawdbot install log'
+          )
+          console.error('Clawdbot installation timed out. Last log:', logResult.output)
+          return { success: false }
+        }
+      }
     }
 
-    // Timed out - check if there was an error
-    const logResult = await this.runCommand(
-      'tail -20 /tmp/browser-use-install.log',
-      'Get browser-use install log'
+    // Verify Clawdbot installation by checking if binary exists
+    const verifyResult = await this.runCommand(
+      'ls ~/.nvm/versions/node/*/bin/clawdbot 2>/dev/null | head -1',
+      'Verify Clawdbot'
     )
-    console.warn('browser-use installation timed out. Last log:', logResult.output)
-    
-    return false
+
+    if (!verifyResult.success || !verifyResult.output.trim() || verifyResult.output.includes('No such file')) {
+      console.error('Clawdbot binary not found')
+      // Show install log for debugging
+      const logResult = await this.runCommand(
+        'cat /tmp/clawdbot-install.log',
+        'Get Clawdbot install log'
+      )
+      console.error('Install log:', logResult.output)
+      return { success: false }
+    }
+
+    // Get installed version for config
+    const versionResult = await this.runCommand(
+      'cat ~/.nvm/versions/node/*/lib/node_modules/clawdbot/package.json 2>/dev/null | grep -o \'"version": "[^"]*"\' | head -1 | cut -d\'"\' -f4',
+      'Get Clawdbot version'
+    )
+
+    const version = versionResult.output.trim() || '2026.1.22'
+
+    this.onProgress?.({
+      step: 'Install Clawdbot',
+      message: `Clawdbot ${version} installed successfully`,
+      success: true,
+    })
+
+    return { success: true, version }
+  }
+
+  /**
+   * Configure Clawdbot with Telegram channel and autonomous task execution
+   * Sets up heartbeat for periodic knowledge checks and task inference
+   */
+  async setupClawdbotTelegram(options: {
+    claudeApiKey: string
+    telegramBotToken: string
+    telegramUserId?: string
+    clawdbotVersion?: string
+    heartbeatIntervalMinutes?: number
+  }): Promise<boolean> {
+    const {
+      claudeApiKey,
+      telegramBotToken,
+      telegramUserId,
+      clawdbotVersion = '2026.1.22',
+      heartbeatIntervalMinutes = 30
+    } = options
+
+    // Create directories
+    await this.runCommand('mkdir -p ~/.clawdbot /home/user/clawd/knowledge', 'Create Clawdbot directories')
+
+    // Generate gateway token
+    const tokenResult = await this.runCommand(
+      'openssl rand -hex 24',
+      'Generate gateway token'
+    )
+    const gatewayToken = tokenResult.output.trim() || 'fallback-token-' + Date.now()
+
+    // Build Telegram allowFrom config
+    const allowFromJson = telegramUserId ? `"allowFrom": ["${telegramUserId}"],` : ''
+
+    // System prompt for autonomous task execution
+    const systemPrompt = `You are Samantha, an autonomous AI assistant with access to a knowledge repository.
+
+Your workspace is at /home/user/clawd.
+
+## Knowledge Directory Structure
+- /home/user/clawd/knowledge/vault - The main GitHub vault repository (auto-synced every minute)
+- /home/user/clawd/knowledge/* - Additional knowledge repositories
+
+The vault contains your primary knowledge base including tasks, notes, projects, and context about what needs to be done.
+
+## Behavior
+
+**When receiving user messages:**
+- Prioritize and execute user-requested tasks immediately
+- Be helpful, proactive, and thorough
+
+**During heartbeat (periodic check):**
+1. Check /home/user/clawd/knowledge/vault for updates (look at recently modified files)
+2. Look for tasks.md, TODO.md, or any task lists in the vault
+3. Review the overall state of projects and identify work that needs to be done
+4. If you find actionable tasks, create a plan and begin execution
+5. If no tasks are found, analyze the knowledge to proactively suggest improvements or identify opportunities
+6. Report significant progress or findings to the user via chat
+
+**Task Prioritization:**
+1. Explicit user requests (highest priority)
+2. Tasks marked as urgent/P0/P1 in task files
+3. Inferred tasks from knowledge analysis
+4. Proactive improvements and suggestions
+
+Always keep the user informed of what you're working on and any significant decisions.`
+
+    // Create config JSON with heartbeat enabled
+    const configJson = `{
+  "meta": {
+    "lastTouchedVersion": "${clawdbotVersion}"
+  },
+  "auth": {
+    "profiles": {
+      "anthropic:default": {
+        "provider": "anthropic",
+        "mode": "api_key"
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "workspace": "/home/user/clawd",
+      "systemPrompt": ${JSON.stringify(systemPrompt)},
+      "compaction": {
+        "mode": "safeguard"
+      },
+      "maxConcurrent": 4,
+      "subagents": {
+        "maxConcurrent": 8
+      }
+    }
+  },
+  "heartbeat": {
+    "enabled": true,
+    "intervalMinutes": ${heartbeatIntervalMinutes},
+    "prompt": "Heartbeat check: Review the vault at /home/user/clawd/knowledge/vault for any updates or tasks. Start by listing recent changes with 'find /home/user/clawd/knowledge/vault -type f -mmin -60' to see files modified in the last hour. Check for tasks.md, TODO.md, or task lists. If there are pending tasks, create a plan and begin work. If no explicit tasks, analyze the vault contents and identify useful work to do. Report back with HEARTBEAT_OK if nothing needs immediate attention, or describe what you're working on."
+  },
+  "messages": {
+    "ackReactionScope": "group-mentions"
+  },
+  "commands": {
+    "native": "auto",
+    "nativeSkills": "auto"
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "botToken": "${telegramBotToken}",
+      "dmPolicy": "allowlist",
+      ${allowFromJson}
+      "groupPolicy": "allowlist"
+    }
+  },
+  "gateway": {
+    "port": 18789,
+    "mode": "local",
+    "bind": "loopback",
+    "auth": {
+      "mode": "token",
+      "token": "${gatewayToken}"
+    }
+  },
+  "plugins": {
+    "entries": {
+      "telegram": {"enabled": true}
+    }
+  }
+}`
+
+    // Write config using base64 to avoid escaping issues
+    const configB64 = Buffer.from(configJson).toString('base64')
+    const writeConfig = await this.runCommand(
+      `echo '${configB64}' | base64 -d > ~/.clawdbot/clawdbot.json`,
+      'Write Clawdbot config'
+    )
+
+    if (!writeConfig.success) {
+      console.error('Failed to write Clawdbot config:', writeConfig.output)
+      return false
+    }
+
+    // Add environment variables to bashrc
+    const bashrcAdditions = `
+# Clawdbot configuration
+export NVM_DIR="\\$HOME/.nvm"
+[ -s "\\$NVM_DIR/nvm.sh" ] && . "\\$NVM_DIR/nvm.sh"
+export ANTHROPIC_API_KEY='${claudeApiKey}'
+export TELEGRAM_BOT_TOKEN='${telegramBotToken}'
+`
+
+    await this.runCommand(
+      `cat >> ~/.bashrc << 'BASHEOF'
+${bashrcAdditions}
+BASHEOF`,
+      'Configure environment'
+    )
+
+    this.onProgress?.({
+      step: 'Setup Clawdbot',
+      message: 'Clawdbot configured with Telegram',
+      success: true,
+    })
+
+    return true
+  }
+
+  /**
+   * Start the Clawdbot gateway as a background process
+   */
+  async startClawdbotGateway(claudeApiKey: string, telegramBotToken: string): Promise<boolean> {
+    // Create startup script with better error handling
+    const startupScript = `#!/bin/bash
+# Don't use set -e, we want to log errors
+
+# Source bashrc to get environment
+source ~/.bashrc 2>/dev/null || true
+
+# Setup NVM
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+
+# Set environment variables
+export ANTHROPIC_API_KEY="${claudeApiKey}"
+export TELEGRAM_BOT_TOKEN="${telegramBotToken}"
+
+# Log startup
+echo "[$(date +'%Y-%m-%d %H:%M:%S')] Starting Clawdbot gateway..." >> /tmp/clawdbot.log
+echo "[$(date +'%Y-%m-%d %H:%M:%S')] NVM_DIR: $NVM_DIR" >> /tmp/clawdbot.log
+echo "[$(date +'%Y-%m-%d %H:%M:%S')] Node version: $(node -v 2>&1 || echo 'node not found')" >> /tmp/clawdbot.log
+echo "[$(date +'%Y-%m-%d %H:%M:%S')] PATH: $PATH" >> /tmp/clawdbot.log
+
+# Check if clawdbot is available
+if ! command -v clawdbot &> /dev/null; then
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: clawdbot command not found" >> /tmp/clawdbot.log
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] Checking NVM..." >> /tmp/clawdbot.log
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] Node path: $(which node || echo 'node not in PATH')" >> /tmp/clawdbot.log
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] Clawdbot path: $(find ~/.nvm -name clawdbot 2>/dev/null | head -1 || echo 'clawdbot not found')" >> /tmp/clawdbot.log
+    exit 1
+fi
+
+echo "[$(date +'%Y-%m-%d %H:%M:%S')] Clawdbot found: $(which clawdbot)" >> /tmp/clawdbot.log
+echo "[$(date +'%Y-%m-%d %H:%M:%S')] Running: clawdbot gateway run" >> /tmp/clawdbot.log
+
+# Run gateway (don't use exec, so we can catch errors)
+clawdbot gateway run 2>&1 | while IFS= read -r line; do
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $line" >> /tmp/clawdbot.log
+    echo "$line"
+done
+
+# If we get here, the gateway exited
+EXIT_CODE=$?
+echo "[$(date +'%Y-%m-%d %H:%M:%S')] Gateway exited with code: $EXIT_CODE" >> /tmp/clawdbot.log
+exit $EXIT_CODE
+`
+
+    const scriptB64 = Buffer.from(startupScript).toString('base64')
+
+    await this.runCommand(
+      `echo '${scriptB64}' | base64 -d > /tmp/start-clawdbot.sh && chmod +x /tmp/start-clawdbot.sh`,
+      'Create Clawdbot startup script'
+    )
+
+    // Kill any existing gateway process first
+    await this.runCommand(
+      "pkill -f 'clawdbot gateway' || true",
+      'Kill existing gateway process'
+    )
+
+    // Wait a moment for process to die
+    await new Promise(resolve => setTimeout(resolve, 2000))
+
+    // Start gateway in background
+    const startResult = await this.runCommand(
+      'nohup /tmp/start-clawdbot.sh >> /tmp/clawdbot.log 2>&1 & echo $!',
+      'Start Clawdbot gateway'
+    )
+
+    // Wait a moment for startup
+    await new Promise(resolve => setTimeout(resolve, 5000))
+
+    // Check if gateway is running (with retries)
+    let isRunning = false
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const checkResult = await this.runCommand(
+        "pgrep -f 'clawdbot gateway' > /dev/null && echo 'RUNNING' || echo 'NOT_RUNNING'",
+        'Check gateway status'
+      )
+
+      isRunning = checkResult.output.includes('RUNNING')
+      
+      if (isRunning) break
+      
+      // Wait a bit longer before next check
+      if (attempt < 2) {
+        await new Promise(resolve => setTimeout(resolve, 3000))
+      }
+    }
+
+    // If not running, check the log for errors
+    if (!isRunning) {
+      const logCheck = await this.runCommand(
+        'tail -20 /tmp/clawdbot.log 2>/dev/null || echo "No log file"',
+        'Check gateway logs'
+      )
+      console.log('Gateway startup log:', logCheck.output)
+    }
+
+    this.onProgress?.({
+      step: 'Start Gateway',
+      message: isRunning 
+        ? 'Clawdbot gateway is running' 
+        : 'Gateway failed to start. Check /tmp/clawdbot.log for errors.',
+      success: isRunning,
+    })
+
+    return isRunning
   }
 
   /**
@@ -463,126 +928,6 @@ chmod +x ~/vault-sync-daemon.sh`,
   }
 
   /**
-   * Set up Ralph Wiggum - Autonomous AI Task Executor
-   * Uses Orgo SDK for computer use and browser-use for web automation
-   * Can infer tasks from vault when tasks.md is empty (P1/P2)
-   */
-  async setupRalphWiggum(claudeApiKey: string, orgoApiKey: string, computerId: string): Promise<boolean> {
-    // Download Ralph Wiggum script from GitHub Gist (hosted externally to avoid command size limits)
-    const RALPH_GIST_URL = 'https://gist.githubusercontent.com/Prakshal-Jain/660d4b056a0f2554a663a171fda40c9f/raw/ralph_wiggum.py'
-    
-    this.onProgress?.({
-      step: 'Ralph Wiggum',
-      message: 'Downloading task executor script...',
-      success: true,
-    })
-    
-    const downloadResult = await this.runCommand(
-      `curl -fsSL "${RALPH_GIST_URL}" -o ~/ralph_wiggum.py && chmod +x ~/ralph_wiggum.py`,
-      'Download Ralph Wiggum script'
-    )
-    
-    if (!downloadResult.success) {
-      console.error('Failed to download Ralph Wiggum script:', downloadResult.output)
-      return false
-    }
-    
-    // Verify the script was downloaded
-    const verifyResult = await this.runCommand(
-      'head -5 ~/ralph_wiggum.py',
-      'Verify script download'
-    )
-    
-    if (!verifyResult.success || !verifyResult.output.includes('Ralph Wiggum')) {
-      console.error('Script verification failed:', verifyResult.output)
-      return false
-    }
-    
-    this.onProgress?.({
-      step: 'Ralph Wiggum',
-      message: 'Script downloaded successfully',
-      success: true,
-    })
-
-    // Create wrapper script with environment variables and auto-restart
-    // Note: Only one instance should run at a time (Ralph has its own lock file)
-    const wrapperScript = `#!/bin/bash
-# Ralph Wiggum wrapper - runs with auto-restart on failure
-export ANTHROPIC_API_KEY="${claudeApiKey}"
-export ORGO_API_KEY="${orgoApiKey}"
-export ORGO_COMPUTER_ID="${computerId}"
-
-# Ensure we're in home directory
-cd ~
-
-while true; do
-    # Check if another instance is already running (via lock file or process)
-    if [ -f /tmp/ralph_task.lock ]; then
-        echo "[$(date)] Lock file exists, waiting..." >> ~/ralph_wiggum.log
-        sleep 30
-        continue
-    fi
-    
-    echo "[$(date)] Starting Ralph Wiggum (Samantha Task Executor)..." >> ~/ralph_wiggum.log
-    python3 ~/ralph_wiggum.py
-    EXIT_CODE=$?
-    echo "[$(date)] Ralph Wiggum exited with code $EXIT_CODE, restarting in 10s..." >> ~/ralph_wiggum.log
-    sleep 10
-done
-`
-
-    const createWrapper = await this.runCommand(
-      `cat > ~/start-ralph.sh << 'WRAPPER_EOF'
-${wrapperScript}
-WRAPPER_EOF
-chmod +x ~/start-ralph.sh`,
-      'Create Ralph Wiggum wrapper script'
-    )
-
-    if (!createWrapper.success) return false
-
-    // Start Ralph Wiggum as background process
-    // First, cleanup any existing instances (optional - can fail silently)
-    // Use separate simple commands to avoid parsing issues
-    // These commands will succeed even if processes don't exist (|| true ensures exit code 0)
-    const cleanup1 = await this.runCommand(
-      'pkill -f start-ralph.sh 2>/dev/null || true',
-      'Cleanup existing Ralph processes'
-    )
-    const cleanup2 = await this.runCommand(
-      'pkill -f ralph_wiggum.py 2>/dev/null || true',
-      'Cleanup existing Ralph processes'
-    )
-    // Ignore results - cleanup is optional and might not find processes
-    
-    // Remove lock file if it exists (also optional)
-    await this.runCommand(
-      'rm -f /tmp/ralph_task.lock 2>/dev/null || true',
-      'Remove lock file'
-    )
-    
-    // Wait a moment for cleanup
-    await new Promise(resolve => setTimeout(resolve, 2000))
-    
-    // Start Ralph (simple command like other working background processes)
-    const startRalph = await this.runCommand(
-      'nohup ~/start-ralph.sh > /dev/null 2>&1 &',
-      'Start Ralph Wiggum (background)'
-    )
-
-    if (startRalph.success) {
-      this.onProgress?.({
-        step: 'Ralph Wiggum',
-        message: 'Samantha Task Executor started with full computer use capabilities',
-        success: true,
-      })
-    }
-
-    return startRalph.success
-  }
-
-
-  /**
    * Store Claude API key securely
    */
   async storeClaudeKey(apiKey: string): Promise<boolean> {
@@ -603,6 +948,10 @@ chmod +x ~/start-ralph.sh`,
     claudeApiKey: string
     orgoApiKey: string
     computerId: string
+    telegramBotToken?: string
+    telegramUserId?: string
+    knowledgeRepos?: Array<{ name: string; sshUrl: string }>
+    heartbeatIntervalMinutes?: number  // Default: 30 minutes
   }): Promise<{ success: boolean; error?: string }> {
     try {
       // 1. Install Python
@@ -631,25 +980,59 @@ chmod +x ~/start-ralph.sh`,
       const cloneOk = await this.cloneVaultRepo(options.repoSshUrl)
       if (!cloneOk) throw new Error('Failed to clone vault repository')
 
-      // 6. Install browser-use
-      this.onProgress?.({ step: 'browser-use', message: 'Installing browser-use...', success: true })
-      const browserOk = await this.installBrowserUse()
-      if (!browserOk) throw new Error('Failed to install browser-use')
+      // 6. Install Clawdbot (NVM + Node.js 22 + Clawdbot)
+      this.onProgress?.({ step: 'clawdbot', message: 'Installing Clawdbot...', success: true })
+      const clawdbotResult = await this.installClawdbot()
+      if (!clawdbotResult.success) throw new Error('Failed to install Clawdbot')
 
-      // 7. Set up Git sync
+      // 7. Link vault to Clawdbot knowledge directory (now that directories can be created)
+      this.onProgress?.({ step: 'link-vault', message: 'Linking vault to Clawdbot knowledge...', success: true })
+      const linkOk = await this.linkVaultToKnowledge()
+      if (!linkOk) throw new Error('Failed to link vault to knowledge directory')
+
+      // 8. Set up Git sync
       this.onProgress?.({ step: 'sync', message: 'Setting up Git sync...', success: true })
       const syncOk = await this.setupGitSync()
       if (!syncOk) throw new Error('Failed to set up Git sync')
 
-      // 8. Store Claude API key
-      this.onProgress?.({ step: 'claude', message: 'Storing Claude API key...', success: true })
-      const claudeOk = await this.storeClaudeKey(options.claudeApiKey)
-      if (!claudeOk) throw new Error('Failed to store Claude API key')
+      // 9. Clone additional knowledge repositories for Clawdbot context
+      if (options.knowledgeRepos && options.knowledgeRepos.length > 0) {
+        this.onProgress?.({ step: 'knowledge', message: 'Cloning knowledge repositories...', success: true })
+        const repoResult = await this.cloneRepositories(options.knowledgeRepos)
+        if (!repoResult.success) {
+          console.warn('Some knowledge repos failed to clone:', repoResult.errors)
+        }
 
-      // 9. Set up Ralph Wiggum (Samantha Task Executor)
-      this.onProgress?.({ step: 'ralph', message: 'Setting up Samantha Task Executor...', success: true })
-      const ralphOk = await this.setupRalphWiggum(options.claudeApiKey, options.orgoApiKey, options.computerId)
-      if (!ralphOk) throw new Error('Failed to set up Samantha Task Executor')
+        // Link cloned repos to Clawdbot workspace
+        const repoNames = options.knowledgeRepos.map(r => r.name)
+        await this.setupClawdbotKnowledge(repoNames)
+      }
+
+      // 10. Configure Clawdbot with Telegram and heartbeat (if token provided)
+      if (options.telegramBotToken) {
+        this.onProgress?.({ step: 'telegram', message: 'Configuring Telegram connector with autonomous heartbeat...', success: true })
+        const telegramOk = await this.setupClawdbotTelegram({
+          claudeApiKey: options.claudeApiKey,
+          telegramBotToken: options.telegramBotToken,
+          telegramUserId: options.telegramUserId,
+          clawdbotVersion: clawdbotResult.version,
+          heartbeatIntervalMinutes: options.heartbeatIntervalMinutes,
+        })
+        if (!telegramOk) throw new Error('Failed to configure Telegram')
+
+        // 11. Start the Clawdbot gateway
+        this.onProgress?.({ step: 'gateway', message: 'Starting Clawdbot gateway...', success: true })
+        const gatewayOk = await this.startClawdbotGateway(
+          options.claudeApiKey,
+          options.telegramBotToken
+        )
+        if (!gatewayOk) console.warn('Gateway may still be starting, check /tmp/clawdbot.log')
+      } else {
+        // Just store Claude API key if no Telegram
+        this.onProgress?.({ step: 'claude', message: 'Storing Claude API key...', success: true })
+        const claudeOk = await this.storeClaudeKey(options.claudeApiKey)
+        if (!claudeOk) throw new Error('Failed to store Claude API key')
+      }
 
       return { success: true }
     } catch (error) {

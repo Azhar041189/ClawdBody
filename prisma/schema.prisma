@@ -81,9 +81,10 @@ model SetupState {
   vmCreated           Boolean @default(false)
   repoCreated         Boolean @default(false)
   repoCloned          Boolean @default(false)
-  browserUseInstalled Boolean @default(false)
   gitSyncConfigured   Boolean @default(false)
-  ralphWiggumSetup    Boolean @default(false)
+  clawdbotInstalled   Boolean @default(false)
+  telegramConfigured  Boolean @default(false)
+  gatewayStarted      Boolean @default(false)
 
   errorMessage String?
 

@@ -75,9 +75,7 @@ export async function GET(request: NextRequest) {
                 vmCreated: false,
                 repoCreated: false,
                 repoCloned: false,
-                browserUseInstalled: false,
                 gitSyncConfigured: false,
-                ralphWiggumSetup: false,
                 errorMessage: null,
               },
             })

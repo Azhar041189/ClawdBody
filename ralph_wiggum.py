@@ -6,7 +6,6 @@ Features:
 - Monitors tasks.md for P0 (explicit) tasks
 - Infers P1/P2 tasks from vault when no explicit tasks
 - Uses Orgo SDK for computer use (GUI control, screenshots)
-- Uses browser-use for web automation
 - Uses Anthropic API with tool use for intelligent execution
 """
 
@@ -655,17 +654,6 @@ def execute_task_with_orgo(task: dict) -> dict:
                 }
             },
             {
-                "name": "browser_use",
-                "description": "Use browser for web tasks (searching, booking, form filling).",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "instruction": {"type": "string", "description": "What to do in the browser"}
-                    },
-                    "required": ["instruction"]
-                }
-            },
-            {
                 "name": "task_complete",
                 "description": "Mark the current task as complete with a summary.",
                 "input_schema": {
@@ -690,9 +678,9 @@ Location: ~/vault/
 **ALWAYS use GUI tools first for user-facing tasks!**
 
 ### For Web Tasks (booking, searching, browsing):
-1. **First**: Use 'computer' tool with action='click' to click the browser icon/app
-2. **Then**: Use 'browser_use' tool for web automation, OR
-3. **Or**: Use 'computer' tool with action='type' to type URLs, then action='key' to press Return
+1. **Open the browser**: Use 'computer' tool with action='click' to click the browser icon/app
+2. **Navigate**: Use 'computer' tool with action='type' to type URLs, then action='key' to press Return
+3. **Interact**: Use 'computer' tool to click, scroll, and type in the browser
 4. **Take screenshots when necessary** (action='screenshot') to see what's happening
 
 ### For GUI Tasks:
@@ -765,8 +753,7 @@ Location: ~/vault/
 {task_context if task_context else ""}
 
 **IMPORTANT**: This task should be performed using GUI interactions visible on screen:
-- For web tasks: Open browser using computer tool (click browser icon), then use browser_use tool
-- For booking/research: Use browser_use tool or interact via computer tool (click, type)
+- For web tasks: Open browser using computer tool (click browser icon), then navigate and interact with the computer tool
 - Take screenshots frequently to see your progress
 - Use GUI tools (click, type, key) rather than bash commands when the user should see the interaction
 
@@ -932,35 +919,6 @@ def process_orgo_tool(name: str, input_data: dict):
             push_to_github()
         return f"Wrote to {path} (synced)" if "error" not in str(result).lower() else f"Error: {result}"
     
-    elif name == "browser_use":
-        instruction = input_data.get("instruction", "")
-        # Escape instruction for embedding in Python string (can't use backslash in f-string)
-        escaped_instruction = instruction.replace('"', "'").replace("\n", " ")
-        # Use browser-use library via bash - ensure DISPLAY is set for visible browser
-        script = f'''
-import asyncio
-import os
-from browser_use import Agent
-from langchain_anthropic import ChatAnthropic
-
-# Ensure browser is visible
-os.environ["DISPLAY"] = ":0"
-
-async def main():
-    agent = Agent(
-        task="{escaped_instruction}",
-        llm=ChatAnthropic(model="claude-sonnet-4-20250514"),
-        headless=False,  # Make browser visible
-    )
-    result = await agent.run()
-    print(result)
-
-asyncio.run(main())
-'''
-        # Set DISPLAY and run browser-use in visible mode
-        result = orgo_bash(f"export DISPLAY=:0 && cd ~/browser-use-env && source bin/activate && python3 -c '{script}'")
-        return result.get("output", "Browser task completed")[:3000]
-    
     elif name == "task_complete":
         return {"type": "task_complete", "summary": input_data.get("summary", "Completed")}
     
@@ -1014,17 +972,6 @@ def execute_task_with_anthropic(task: dict) -> dict:
                 }
             },
             {
-                "name": "browser_use",
-                "description": "Use browser for web tasks (searching, booking, form filling).",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "instruction": {"type": "string", "description": "What to do in the browser"}
-                    },
-                    "required": ["instruction"]
-                }
-            },
-            {
                 "name": "task_complete",
                 "description": "Mark the current task as complete with a summary.",
                 "input_schema": {
@@ -1049,13 +996,12 @@ Location: ~/vault/
 {vault_context[:2000]}
 
 ## Tool Guidelines
-1. **For web tasks (booking, searching, browsing)**: ALWAYS use 'browser_use' tool - it will open a visible browser
-2. Use tools aggressively to accomplish the task
-3. Save learnings to ~/vault/context/
-4. When done, use task_complete tool with summary
-5. Log important actions
+1. Use tools aggressively to accomplish the task
+2. Save learnings to ~/vault/context/
+3. When done, use task_complete tool with summary
+4. Log important actions
 
-**CRITICAL**: For tasks involving browsers, booking, or web research - use 'browser_use' tool, NOT bash commands!
+**CRITICAL**: For tasks involving browsers, booking, or web research - use GUI tools, NOT bash commands!
 """
 
         messages = [{
@@ -1066,9 +1012,9 @@ Location: ~/vault/
 {task_context if task_context else ""}
 
 **IMPORTANT**: If this task involves web browsing, booking, or research:
-- Use 'browser_use' tool to open a visible browser and perform the task
+- Use GUI tools to open the browser and interact with pages
 - The browser will be visible on screen
-- For booking/research tasks, prefer browser_use over bash commands
+- Prefer GUI actions over bash commands
 
 Use tools to complete this. Call task_complete when finished."""
         }]
@@ -1153,44 +1099,6 @@ def process_tool(name: str, input_data: dict) -> str:
             return f"Successfully wrote to {input_data['path']} (synced to GitHub)"
         except Exception as e:
             return f"Error writing: {e}"
-    
-    elif name == "browser_use":
-        try:
-            # Use browser-use library (escape quotes without backslash in f-string)
-            escaped_task = input_data.get('instruction', '').replace('"', "'").replace('\n', ' ')
-            script = f'''
-import asyncio
-import os
-from browser_use import Agent
-from langchain_anthropic import ChatAnthropic
-
-# Ensure browser is visible
-os.environ["DISPLAY"] = ":0"
-
-async def main():
-    agent = Agent(
-        task="{escaped_task}",
-        llm=ChatAnthropic(model="claude-sonnet-4-20250514"),
-        headless=False,  # Make browser visible
-    )
-    result = await agent.run()
-    print(result)
-
-asyncio.run(main())
-'''
-            # Set DISPLAY environment variable for visible browser
-            env = {**os.environ, "ANTHROPIC_API_KEY": ANTHROPIC_API_KEY, "DISPLAY": ":0"}
-            result = subprocess.run(
-                ["python3", "-c", script],
-                capture_output=True,
-                text=True,
-                timeout=300,
-                env=env,
-                cwd=str(Path.home() / "browser-use-env" / "bin")
-            )
-            return result.stdout[:3000] or result.stderr[:1000] or "Browser task completed"
-        except Exception as e:
-            return f"Browser error: {e}"
     
     elif name == "task_complete":
         return f"TASK_COMPLETE:{input_data['summary']}"

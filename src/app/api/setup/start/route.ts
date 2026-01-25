@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { claudeApiKey } = await request.json()
+    const { claudeApiKey, telegramBotToken, telegramUserId } = await request.json()
 
     if (!claudeApiKey) {
       return NextResponse.json({ error: 'Claude API key is required' }, { status: 400 })
@@ -53,15 +53,13 @@ export async function POST(request: NextRequest) {
           vmCreated: false,
           repoCreated: false,
           repoCloned: false,
-          browserUseInstalled: false,
           gitSyncConfigured: false,
-          ralphWiggumSetup: false,
         },
       })
     }
 
     // Start async setup process
-    runSetupProcess(session.user.id, claudeApiKey, orgoApiKey).catch(console.error)
+    runSetupProcess(session.user.id, claudeApiKey, orgoApiKey, telegramBotToken, telegramUserId).catch(console.error)
 
     return NextResponse.json({ 
       success: true, 
@@ -78,15 +76,22 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function runSetupProcess(userId: string, claudeApiKey: string, orgoApiKey: string) {
+async function runSetupProcess(
+  userId: string, 
+  claudeApiKey: string, 
+  orgoApiKey: string,
+  telegramBotToken?: string,
+  telegramUserId?: string
+) {
   const updateStatus = async (updates: Partial<{
     status: string
     vmCreated: boolean
     repoCreated: boolean
     repoCloned: boolean
-    browserUseInstalled: boolean
     gitSyncConfigured: boolean
-    ralphWiggumSetup: boolean
+    clawdbotInstalled: boolean
+    telegramConfigured: boolean
+    gatewayStarted: boolean
     orgoProjectId: string
     orgoComputerId: string
     orgoComputerUrl: string
@@ -290,27 +295,57 @@ async function runSetupProcess(userId: string, claudeApiKey: string, orgoApiKey:
     }
     await updateStatus({ repoCloned: true })
 
-    // TODO: Install browser-use
-    const browserSuccess = await vmSetup.installBrowserUse()
-    if (!browserSuccess) {
-      console.warn('browser-use installation had issues, continuing...')
-    }
-    await updateStatus({ browserUseInstalled: true })
-
     // Set up Git sync
     await vmSetup.setupGitSync()
     await updateStatus({ gitSyncConfigured: true })
 
-    // Store Claude API key and Orgo credentials
-    await vmSetup.storeClaudeKey(claudeApiKey)
+    // Install Clawdbot (NVM + Node.js 22 + Clawdbot)
+    console.log('Installing Clawdbot...')
+    const clawdbotResult = await vmSetup.installClawdbot()
+    if (!clawdbotResult.success) {
+      throw new Error('Failed to install Clawdbot')
+    }
+    await updateStatus({ clawdbotInstalled: true })
 
-    // Set up Ralph Wiggum (Samantha Task Executor) with full computer use
-    console.log('Setting up Samantha Task Executor (Ralph Wiggum)...')
-    await vmSetup.setupRalphWiggum(claudeApiKey, orgoApiKey, computer.id)
-    await updateStatus({ ralphWiggumSetup: true })
+    // Link vault to Clawdbot knowledge directory
+    console.log('Linking vault to Clawdbot knowledge directory...')
+    const linkSuccess = await vmSetup.linkVaultToKnowledge()
+    if (!linkSuccess) {
+      throw new Error('Failed to link vault to knowledge directory')
+    }
 
     // Clone pending GitHub repositories if any
     await clonePendingGitHubRepositories(userId, orgoApiKey, computer.id, githubClient, setupState)
+
+    // Configure Clawdbot with Telegram if token is provided (from UI or env)
+    const finalTelegramToken = telegramBotToken || process.env.TELEGRAM_BOT_TOKEN
+    const finalTelegramUserId = telegramUserId || process.env.TELEGRAM_USER_ID
+
+    if (finalTelegramToken) {
+      console.log('Configuring Clawdbot with Telegram...')
+      const telegramSuccess = await vmSetup.setupClawdbotTelegram({
+        claudeApiKey,
+        telegramBotToken: finalTelegramToken,
+        telegramUserId: finalTelegramUserId,
+        clawdbotVersion: clawdbotResult.version,
+        heartbeatIntervalMinutes: 30,
+      })
+      await updateStatus({ telegramConfigured: telegramSuccess })
+
+      if (telegramSuccess) {
+        console.log('Starting Clawdbot gateway...')
+        const gatewaySuccess = await vmSetup.startClawdbotGateway(claudeApiKey, finalTelegramToken)
+        await updateStatus({ gatewayStarted: gatewaySuccess })
+        
+        if (!gatewaySuccess) {
+          console.warn('⚠️  Gateway failed to start. Check /tmp/clawdbot.log on the VM for details.')
+          // Don't fail the entire setup, but log the warning
+        }
+      }
+    } else {
+      // Just store Claude API key if no Telegram
+      await vmSetup.storeClaudeKey(claudeApiKey)
+    }
 
     // Setup complete!
     await updateStatus({ status: 'ready' })

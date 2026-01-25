@@ -21,9 +21,10 @@ export async function GET(request: NextRequest) {
         vmCreated: false,
         repoCreated: false,
         repoCloned: false,
-        browserUseInstalled: false,
         gitSyncConfigured: false,
-        ralphWiggumSetup: false,
+        clawdbotInstalled: false,
+        telegramConfigured: false,
+        gatewayStarted: false,
       })
     }
 
@@ -41,9 +42,10 @@ export async function GET(request: NextRequest) {
       vmCreated: setupState.vmCreated,
       repoCreated: setupState.repoCreated,
       repoCloned: setupState.repoCloned,
-      browserUseInstalled: setupState.browserUseInstalled,
       gitSyncConfigured: setupState.gitSyncConfigured,
-      ralphWiggumSetup: setupState.ralphWiggumSetup,
+      clawdbotInstalled: setupState.clawdbotInstalled,
+      telegramConfigured: setupState.telegramConfigured,
+      gatewayStarted: setupState.gatewayStarted,
       orgoComputerId: setupState.orgoComputerId,
       orgoComputerUrl: setupState.orgoComputerUrl,
       vaultRepoUrl: setupState.vaultRepoUrl,

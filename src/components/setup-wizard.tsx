@@ -16,7 +16,9 @@ import {
   RefreshCw,
   ChevronDown,
   ChevronUp,
-  Trash2
+  Trash2,
+  MessageCircle,
+  XCircle
 } from 'lucide-react'
 
 type SetupStep = 
@@ -30,9 +32,10 @@ interface SetupStatus {
   vmCreated: boolean
   repoCreated: boolean
   repoCloned: boolean
-  browserUseInstalled: boolean
   gitSyncConfigured: boolean
-  ralphWiggumSetup: boolean
+  clawdbotInstalled: boolean
+  telegramConfigured: boolean
+  gatewayStarted: boolean
   orgoComputerId?: string
   orgoComputerUrl?: string
   vaultRepoUrl?: string
@@ -113,7 +116,7 @@ export function SetupWizard() {
           if (status.errorMessage) {
             setError(status.errorMessage)
             // Don't change step, just show error
-          } else if (status.status === 'ready' || status.ralphWiggumSetup) {
+          } else if (status.status === 'ready') {
             setCurrentStep('complete')
           } else if (status.status === 'configuring_vm' || status.repoCloned) {
             setCurrentStep('configuring_vm')
@@ -156,7 +159,7 @@ export function SetupWizard() {
             if (status.errorMessage) {
               setError(status.errorMessage)
               // Don't change step, just show error
-            } else if (status.status === 'ready' || status.ralphWiggumSetup) {
+            } else if (status.status === 'ready') {
               setCurrentStep('complete')
             } else if (status.status === 'configuring_vm' || status.repoCloned) {
               setCurrentStep('configuring_vm')
@@ -376,24 +379,54 @@ export function SetupWizard() {
                           status={setupStatus?.repoCreated ? 'complete' : currentStep === 'creating_repo' ? 'running' : 'pending'}
                         />
                         <SetupTaskItem
+                          label="Installing Python & tools"
+                          sublabel="Python3, Git, SSH client"
+                          status={setupStatus?.repoCloned ? 'complete' : (setupStatus?.vmCreated && currentStep === 'configuring_vm') ? 'running' : 'pending'}
+                        />
+                        <SetupTaskItem
+                          label="Installing AI SDKs"
+                          sublabel="Anthropic SDK, Pillow, requests"
+                          status={setupStatus?.repoCloned ? 'complete' : (setupStatus?.vmCreated && currentStep === 'configuring_vm') ? 'running' : 'pending'}
+                        />
+                        <SetupTaskItem
+                          label="Generating SSH key"
+                          sublabel="ED25519 key for GitHub access"
+                          status={setupStatus?.repoCloned ? 'complete' : (setupStatus?.vmCreated && currentStep === 'configuring_vm') ? 'running' : 'pending'}
+                        />
+                        <SetupTaskItem
+                          label="Configuring Git"
+                          sublabel="User identity and SSH known hosts"
+                          status={setupStatus?.repoCloned ? 'complete' : (setupStatus?.vmCreated && currentStep === 'configuring_vm') ? 'running' : 'pending'}
+                        />
+                        <SetupTaskItem
                           label="Cloning vault to VM"
-                          sublabel="Setting up Git sync"
+                          sublabel="Git clone to ~/vault"
                           status={setupStatus?.repoCloned ? 'complete' : (setupStatus?.repoCreated && currentStep === 'configuring_vm') ? 'running' : 'pending'}
                         />
                         <SetupTaskItem
-                          label="Installing browser-use"
-                          sublabel="Browser automation library"
-                          status={setupStatus?.browserUseInstalled ? 'complete' : (setupStatus?.repoCloned && currentStep === 'configuring_vm') ? 'running' : 'pending'}
+                          label="Setting up Git sync"
+                          sublabel="Auto-sync with GitHub (cron)"
+                          status={setupStatus?.gitSyncConfigured ? 'complete' : (setupStatus?.repoCloned && currentStep === 'configuring_vm') ? 'running' : 'pending'}
                         />
                         <SetupTaskItem
-                          label="Configuring Git sync"
-                          sublabel="Auto-sync with GitHub"
-                          status={setupStatus?.gitSyncConfigured ? 'complete' : (setupStatus?.browserUseInstalled && currentStep === 'configuring_vm') ? 'running' : 'pending'}
+                          label="Installing Clawdbot"
+                          sublabel="NVM + Node.js 22 + Clawdbot"
+                          status={setupStatus?.clawdbotInstalled ? 'complete' : (setupStatus?.gitSyncConfigured && currentStep === 'configuring_vm') ? 'running' : 'pending'}
                         />
                         <SetupTaskItem
-                          label="Setting up Ralph Wiggum"
-                          sublabel="Long-running task manager"
-                          status={setupStatus?.ralphWiggumSetup ? 'complete' : (setupStatus?.gitSyncConfigured && currentStep === 'configuring_vm') ? 'running' : 'pending'}
+                          label="Linking vault to knowledge"
+                          sublabel="Symlink to /home/user/clawd/knowledge"
+                          status={setupStatus?.telegramConfigured ? 'complete' : (setupStatus?.clawdbotInstalled && currentStep === 'configuring_vm') ? 'running' : 'pending'}
+                        />
+                        <SetupTaskItem
+                          label="Configuring Telegram"
+                          sublabel="Chat gateway with heartbeat"
+                          status={setupStatus?.telegramConfigured ? 'complete' : (setupStatus?.clawdbotInstalled && currentStep === 'configuring_vm') ? 'running' : 'pending'}
+                        />
+                        <SetupTaskItem
+                          label="Starting gateway"
+                          sublabel="Clawdbot gateway on port 18789"
+                          status={setupStatus?.gatewayStarted ? 'complete' : (setupStatus?.telegramConfigured && currentStep === 'configuring_vm') ? 'running' : 'pending'}
                         />
                       </div>
 
@@ -515,6 +548,75 @@ export function SetupWizard() {
                 </div>
               </div>
 
+              {/* Telegram Connection Status */}
+              {setupStatus && (
+                <div className="p-6 rounded-xl border border-sam-border bg-sam-surface/50">
+                  <h3 className="font-display font-bold mb-4 flex items-center gap-2">
+                    <MessageCircle className="w-5 h-5 text-sam-accent" />
+                    Telegram Connection
+                  </h3>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-sam-bg/50">
+                      <span className="text-sm text-sam-text-dim">Bot Configuration</span>
+                      {setupStatus.telegramConfigured ? (
+                        <div className="flex items-center gap-2 text-sam-accent">
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span className="text-xs font-mono">Connected</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 text-sam-text-dim">
+                          <XCircle className="w-4 h-4" />
+                          <span className="text-xs font-mono">Not Configured</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-sam-bg/50">
+                      <span className="text-sm text-sam-text-dim">Gateway Status</span>
+                      {setupStatus.gatewayStarted ? (
+                        <div className="flex items-center gap-2 text-sam-accent">
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span className="text-xs font-mono">Running on port 18789</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 text-sam-text-dim">
+                          <XCircle className="w-4 h-4" />
+                          <span className="text-xs font-mono">Stopped</span>
+                        </div>
+                      )}
+                    </div>
+                    {setupStatus.gatewayStarted && (
+                      <div className="flex items-center justify-between p-3 rounded-lg bg-sam-bg/50">
+                        <span className="text-sm text-sam-text-dim">Gateway Port</span>
+                        <code className="text-xs font-mono text-sam-accent bg-sam-bg px-2 py-1 rounded">18789</code>
+                      </div>
+                    )}
+                    {setupStatus.telegramConfigured && setupStatus.gatewayStarted && (
+                      <div className="mt-4 p-3 rounded-lg bg-sam-accent/10 border border-sam-accent/30">
+                        <p className="text-xs text-sam-text-dim mb-2">
+                          <strong className="text-sam-accent">✓ Telegram is connected!</strong>
+                        </p>
+                        <p className="text-xs text-sam-text-dim mb-2">
+                          Gateway is running on <code className="bg-sam-bg px-1 rounded">localhost:18789</code> (loopback mode).
+                        </p>
+                        <p className="text-xs text-sam-text-dim">
+                          Send a message to your bot on Telegram to test the connection. The bot should respond if everything is working correctly.
+                        </p>
+                      </div>
+                    )}
+                    {(!setupStatus.telegramConfigured || !setupStatus.gatewayStarted) && (
+                      <div className="mt-4 p-3 rounded-lg bg-sam-warning/10 border border-sam-warning/30">
+                        <p className="text-xs text-sam-text-dim mb-2">
+                          <strong className="text-sam-warning">Telegram not connected</strong>
+                        </p>
+                        <p className="text-xs text-sam-text-dim">
+                          To enable Telegram, set <code className="bg-sam-bg px-1 rounded">TELEGRAM_BOT_TOKEN</code> and <code className="bg-sam-bg px-1 rounded">TELEGRAM_USER_ID</code> in your environment variables, then restart the setup.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Next steps */}
               <div className="p-6 rounded-xl border border-sam-border bg-sam-surface/50">
                 <h3 className="font-display font-bold mb-4">What's next?</h3>
@@ -531,6 +633,12 @@ export function SetupWizard() {
                     <span className="text-sam-accent">3.</span>
                     <span>Watch OS-1 proactively handle your tasks</span>
                   </li>
+                  {setupStatus?.telegramConfigured && setupStatus?.gatewayStarted && (
+                    <li className="flex items-start gap-3">
+                      <span className="text-sam-accent">4.</span>
+                      <span>Send a message to your Telegram bot to test the connection</span>
+                    </li>
+                  )}
                 </ul>
               </div>
             </motion.div>
@@ -575,9 +683,14 @@ function getTerminalText(step: SetupStep, status: SetupStatus | null): string {
     return 'gh repo create samantha-vault --private --template'
   }
   if (step === 'configuring_vm') {
-    if (status?.browserUseInstalled) return 'systemctl enable git-sync.service'
-    if (status?.repoCloned) return 'pip install browser-use && browser-use install'
-    return 'git clone git@github.com:user/samantha-vault.git ~/vault'
+    if (status?.gatewayStarted) return 'clawdbot gateway run'
+    if (status?.telegramConfigured) return 'nohup /tmp/start-clawdbot.sh &'
+    if (status?.clawdbotInstalled) return 'cat > ~/.clawdbot/clawdbot.json'
+    if (status?.gitSyncConfigured) return 'npm install -g clawdbot@latest'
+    if (status?.repoCloned) return 'crontab -e # setup git sync'
+    if (status?.repoCreated) return 'git clone git@github.com:user/samantha-vault.git ~/vault'
+    if (status?.vmCreated) return 'sudo apt-get install -y python3 git openssh-client'
+    return 'Waiting for VM to be ready...'
   }
   return 'echo "Setup complete!"'
 }
