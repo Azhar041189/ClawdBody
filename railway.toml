@@ -10,3 +10,7 @@ restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
 
 # No function timeout limits - processes can run as long as needed
+
+[build.nixpacks]
+# Use Node.js 20 (required for AWS SDK and E2B packages)
+nixPackages = ["nodejs_20", "npm-10_x", "openssl"]
