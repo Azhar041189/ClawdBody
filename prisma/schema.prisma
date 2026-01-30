@@ -152,10 +152,33 @@ model VM {
 
   errorMessage String?
 
+  // Chat messages for this VM
+  chatMessages ChatMessage[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([userId])
+}
+
+// Chat messages for Clawdbot conversations
+model ChatMessage {
+  id        String   @id @default(cuid())
+  
+  // Can be associated with a specific VM or just a user
+  vmId      String?
+  vm        VM?      @relation(fields: [vmId], references: [id], onDelete: Cascade)
+  
+  userId    String
+  sessionId String   // For grouping messages in a conversation
+  
+  role      String   // 'user', 'assistant', 'error'
+  content   String   @db.Text // Use Text for longer messages
+  
+  createdAt DateTime @default(now())
+  
+  @@index([userId, sessionId])
+  @@index([vmId])
 }
 
 model Integration {

@@ -36,16 +36,17 @@ export async function GET() {
       },
     })
 
-    // Validate Orgo VMs still exist and clean up deleted ones
+    // Validate Orgo VMs still exist - but be VERY conservative about cleanup
+    // Only mark VMs for cleanup if we're absolutely certain they were deleted externally
     const deletedVMIds: string[] = []
 
     // Only validate if we have an Orgo API key
     const orgoApiKey = setupState?.orgoApiKey ? decrypt(setupState.orgoApiKey) : null
     const orgoClient = orgoApiKey ? new OrgoClient(orgoApiKey) : null
 
-    // Grace period: don't validate VMs created in the last 5 minutes
-    // This prevents deleting VMs that are still being provisioned by Orgo
-    const GRACE_PERIOD_MS = 5 * 60 * 1000 // 5 minutes
+    // Grace period: don't validate VMs created in the last 30 minutes
+    // This prevents deleting VMs that are still being provisioned or have transient issues
+    const GRACE_PERIOD_MS = 30 * 60 * 1000 // 30 minutes (increased from 5)
     const now = Date.now()
 
     // Validate Orgo VMs in parallel for better performance
@@ -65,13 +66,25 @@ export async function GET() {
             return { vm, valid: true }
           } catch (error: any) {
             const errorMessage = error?.message || ''
-            // If 404 or "not found", the computer was deleted externally
-            if (errorMessage.includes('404') || errorMessage.toLowerCase().includes('not found') || errorMessage.toLowerCase().includes('desktop not found')) {
-              console.log(`[VMs] Orgo computer ${vm.orgoComputerId} no longer exists, marking for deletion`)
+            const statusCode = errorMessage.match(/Orgo API error: (\d+)/)?.[1]
+            
+            // ONLY consider deletion if we get an explicit 404 status code
+            // AND the error message specifically indicates the computer/desktop was not found
+            // This prevents false positives from other "not found" errors (API key, project, etc.)
+            const isExplicit404 = statusCode === '404'
+            const isComputerNotFound = 
+              errorMessage.toLowerCase().includes('computer not found') ||
+              errorMessage.toLowerCase().includes('desktop not found') ||
+              // Orgo sometimes returns just the ID in the error
+              (isExplicit404 && errorMessage.toLowerCase().includes(vm.orgoComputerId?.toLowerCase() || ''))
+            
+            if (isExplicit404 && isComputerNotFound) {
+              console.log(`[VMs] Orgo computer ${vm.orgoComputerId} confirmed deleted (404 + computer not found), marking for cleanup`)
               return { vm, valid: false, deleted: true }
             } else {
-              // Other errors (network issues, etc.) - keep the VM to be safe
-              console.log(`[VMs] Error checking Orgo computer ${vm.orgoComputerId}: ${errorMessage}, keeping VM`)
+              // For any other error (including generic "not found"), keep the VM
+              // Better to show a stale VM than accidentally delete a valid one
+              console.log(`[VMs] Error checking Orgo computer ${vm.orgoComputerId}: ${errorMessage} (keeping VM to be safe)`)
               return { vm, valid: true }
             }
           }
@@ -91,11 +104,12 @@ export async function GET() {
       .forEach((result) => deletedVMIds.push(result.vm.id))
 
     // Delete VMs that no longer exist in Orgo (in background, don't wait)
+    // Note: We only delete from our DB, not from Orgo (it's already gone there)
     if (deletedVMIds.length > 0) {
       prisma.vM.deleteMany({
         where: { id: { in: deletedVMIds } }
       }).then(() => {
-        console.log(`[VMs] Cleaned up ${deletedVMIds.length} deleted Orgo VMs`)
+        console.log(`[VMs] Cleaned up ${deletedVMIds.length} deleted Orgo VMs from database`)
       }).catch((err) => {
         console.error(`[VMs] Failed to clean up deleted VMs:`, err)
       })

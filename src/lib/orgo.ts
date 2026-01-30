@@ -240,15 +240,60 @@ export class OrgoClient {
 
   /**
    * Wait for computer to be ready
+   * Handles the case where the computer isn't immediately queryable after creation (propagation delay)
    */
   async waitForReady(computerId: string, maxAttempts = 30, intervalMs = 2000): Promise<OrgoComputer> {
+    // Initial delay to allow Orgo to register the computer in their system
+    // This prevents "Computer not found" errors right after creation
+    await new Promise(resolve => setTimeout(resolve, 3000))
+    
+    let lastError: Error | null = null
+    let consecutiveNotFoundErrors = 0
+    const MAX_NOT_FOUND_RETRIES = 10 // Allow up to 10 "not found" errors during propagation
+    
     for (let i = 0; i < maxAttempts; i++) {
-      const computer = await this.getComputer(computerId)
-      if (computer.status === 'running') {
-        return computer
+      try {
+        const computer = await this.getComputer(computerId)
+        // Reset not found counter on successful fetch
+        consecutiveNotFoundErrors = 0
+        
+        if (computer.status === 'running') {
+          return computer
+        }
+        // Computer exists but not running yet - wait and retry
+        lastError = null
+      } catch (error: any) {
+        lastError = error
+        const errorMessage = error?.message || ''
+        
+        // Check if it's a "not found" error (common during propagation delay)
+        const isNotFoundError = 
+          errorMessage.includes('404') || 
+          errorMessage.toLowerCase().includes('not found')
+        
+        if (isNotFoundError) {
+          consecutiveNotFoundErrors++
+          console.log(`[Orgo] Computer ${computerId} not found yet (attempt ${i + 1}/${maxAttempts}, not found count: ${consecutiveNotFoundErrors})`)
+          
+          // If we've exceeded the "not found" retry limit, the computer likely doesn't exist
+          if (consecutiveNotFoundErrors > MAX_NOT_FOUND_RETRIES) {
+            throw new Error(`Computer ${computerId} not found after ${MAX_NOT_FOUND_RETRIES} attempts - it may have failed to create`)
+          }
+          // Otherwise, continue waiting - it's likely just propagation delay
+        } else {
+          // Non "not found" error - log but continue trying
+          console.warn(`[Orgo] Error checking computer ${computerId} status:`, errorMessage)
+        }
       }
+      
       await new Promise(resolve => setTimeout(resolve, intervalMs))
     }
+    
+    // If we exited the loop with a recent "not found" error, throw it
+    if (lastError && consecutiveNotFoundErrors > 0) {
+      throw lastError
+    }
+    
     throw new Error('Computer did not become ready in time')
   }
 }

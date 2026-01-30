@@ -9,6 +9,7 @@ import { Mail, Calendar, MessageSquare, FileText, MessageCircle, Bot, Video, Pho
 import { WebTerminal } from '@/components/WebTerminal'
 import { OrgoTerminal } from '@/components/OrgoTerminal'
 import { E2BTerminal } from '@/components/E2BTerminal'
+import { ClawdbotChat } from '@/components/ClawdbotChat'
 
 interface Connector {
   id: string
@@ -1693,7 +1694,11 @@ function ComputerConnectedView({
 }) {
   const [isDeleting, setIsDeleting] = useState(false)
   const [currentScreenshot, setCurrentScreenshot] = useState<string | null>(null)
-  const [activeVMTab, setActiveVMTab] = useState<'screen' | 'terminal'>('screen')
+  // Default to terminal for AWS/E2B (no screen view), screen for Orgo
+  const [activeVMTab, setActiveVMTab] = useState<'screen' | 'terminal' | 'chat'>(() => {
+    // Will be updated by useEffect when setupStatus loads
+    return 'terminal'
+  })
   const [showTelegramConfig, setShowTelegramConfig] = useState(false)
   const [telegramBotToken, setTelegramBotToken] = useState('')
   const [telegramUserId, setTelegramUserId] = useState('')
@@ -1703,6 +1708,15 @@ function ComputerConnectedView({
   const [isCheckingGateway, setIsCheckingGateway] = useState(false)
   const [isStartingGateway, setIsStartingGateway] = useState(false)
   const [showGatewayLogs, setShowGatewayLogs] = useState(false)
+
+  // Set default tab based on VM provider (Orgo has screen, others start with chat)
+  useEffect(() => {
+    if (setupStatus?.vmProvider === 'orgo') {
+      setActiveVMTab('screen')
+    } else if (setupStatus?.vmProvider === 'aws' || setupStatus?.vmProvider === 'e2b') {
+      setActiveVMTab('chat')
+    }
+  }, [setupStatus?.vmProvider])
 
   // Poll for screenshots continuously (Orgo only - AWS doesn't support screenshots)
   useEffect(() => {
@@ -1810,27 +1824,42 @@ function ComputerConnectedView({
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-      {/* VM Stream (Left Column - 2/3 width) */}
-      <div className="lg:col-span-2 bg-sam-surface/50 border border-sam-border rounded-2xl p-4 flex flex-col">
+    <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+      {/* VM Stream (Left Column - 3/4 width) */}
+      <div className="lg:col-span-3 bg-sam-surface/50 border border-sam-border rounded-2xl p-4 flex flex-col">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-4">
             <h2 className="text-xl font-display font-bold text-sam-text">
               {setupStatus?.vmProvider === 'aws' ? 'EC2 Instance' : setupStatus?.vmProvider === 'e2b' ? 'E2B Sandbox' : 'VM'}
             </h2>
-            {/* Tabs for Orgo VMs only (screen + terminal view) */}
-            {setupStatus?.vmProvider === 'orgo' && setupStatus?.vmCreated && (
+            {/* Tabs for VM views (screen, chat, terminal) */}
+            {setupStatus?.vmCreated && (
               <div className="flex items-center gap-1 bg-sam-bg/80 border border-sam-border rounded-lg p-1">
+                {/* Screen tab - only for Orgo VMs */}
+                {setupStatus?.vmProvider === 'orgo' && (
+                  <button
+                    onClick={() => setActiveVMTab('screen')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border transition-colors ${activeVMTab === 'screen'
+                      ? 'bg-sam-accent/15 text-sam-accent border-sam-accent/30'
+                      : 'text-sam-text-dim hover:text-sam-text hover:bg-sam-surface/50 border-transparent'
+                      }`}
+                  >
+                    <Monitor className="w-3.5 h-3.5" />
+                    Screen
+                  </button>
+                )}
+                {/* Chat tab - before terminal */}
                 <button
-                  onClick={() => setActiveVMTab('screen')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border transition-colors ${activeVMTab === 'screen'
+                  onClick={() => setActiveVMTab('chat')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border transition-colors ${activeVMTab === 'chat'
                     ? 'bg-sam-accent/15 text-sam-accent border-sam-accent/30'
                     : 'text-sam-text-dim hover:text-sam-text hover:bg-sam-surface/50 border-transparent'
                     }`}
                 >
-                  <Monitor className="w-3.5 h-3.5" />
-                  Screen
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  Chat
                 </button>
+                {/* Terminal tab - last */}
                 <button
                   onClick={() => setActiveVMTab('terminal')}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border transition-colors ${activeVMTab === 'terminal'
@@ -1867,23 +1896,47 @@ function ComputerConnectedView({
             </a>
           )}
         </div>
-        <div className="bg-sam-bg flex items-center justify-center relative flex-1 rounded-lg overflow-hidden" style={{ minHeight: '400px' }}>
-          {/* AWS: Interactive Web Terminal */}
-          {setupStatus?.vmProvider === 'aws' && setupStatus?.awsPublicIp ? (
-            <WebTerminal
+        <div className={`bg-sam-bg relative flex-1 rounded-lg overflow-hidden ${activeVMTab === 'chat' ? '' : 'flex items-center justify-center'}`} style={{ minHeight: '600px' }}>
+          {/* Chat tab - available for all providers */}
+          {activeVMTab === 'chat' && setupStatus?.vmCreated ? (
+            <ClawdbotChat
               vmId={vmId || undefined}
-              title={`ubuntu@${setupStatus.awsPublicIp}`}
-              autoConnect={true}
-              className="w-full h-full"
+              className="w-full h-full absolute inset-0"
             />
+          ) : /* AWS: Interactive Web Terminal */
+          setupStatus?.vmProvider === 'aws' && setupStatus?.awsPublicIp ? (
+            activeVMTab === 'terminal' ? (
+              <WebTerminal
+                vmId={vmId || undefined}
+                title={`ubuntu@${setupStatus.awsPublicIp}`}
+                autoConnect={true}
+                className="w-full h-full"
+              />
+            ) : (
+              <WebTerminal
+                vmId={vmId || undefined}
+                title={`ubuntu@${setupStatus.awsPublicIp}`}
+                autoConnect={true}
+                className="w-full h-full"
+              />
+            )
           ) : setupStatus?.vmProvider === 'e2b' && setupStatus?.e2bSandboxId ? (
-            // E2B: Terminal only (no screen view)
-            <E2BTerminal
-              vmId={vmId || undefined}
-              sandboxId={setupStatus?.e2bSandboxId || undefined}
-              title="E2B Sandbox Terminal"
-              className="w-full h-full"
-            />
+            // E2B: Terminal view
+            activeVMTab === 'terminal' ? (
+              <E2BTerminal
+                vmId={vmId || undefined}
+                sandboxId={setupStatus?.e2bSandboxId || undefined}
+                title="E2B Sandbox Terminal"
+                className="w-full h-full"
+              />
+            ) : (
+              <E2BTerminal
+                vmId={vmId || undefined}
+                sandboxId={setupStatus?.e2bSandboxId || undefined}
+                title="E2B Sandbox Terminal"
+                className="w-full h-full"
+              />
+            )
           ) : setupStatus?.vmCreated && setupStatus?.orgoComputerId ? (
             // Orgo VM: Show content based on active tab
             activeVMTab === 'screen' ? (
@@ -1902,7 +1955,7 @@ function ComputerConnectedView({
                   <p className="text-sm font-mono">Loading VM screen...</p>
                 </div>
               )
-            ) : (
+            ) : activeVMTab === 'terminal' ? (
               // Terminal tab - Orgo bash terminal
               <OrgoTerminal
                 vmId={vmId || undefined}
@@ -1910,6 +1963,23 @@ function ComputerConnectedView({
                 title="Orgo Terminal"
                 className="w-full h-full"
               />
+            ) : (
+              // Fallback to screen for Orgo
+              currentScreenshot ? (
+                <img
+                  src={currentScreenshot.startsWith('http') ? currentScreenshot : `data:image/png;base64,${currentScreenshot}`}
+                  alt="VM Screen"
+                  className="w-full h-full object-contain"
+                  onError={(e) => {
+                    setCurrentScreenshot(null)
+                  }}
+                />
+              ) : (
+                <div className="flex flex-col items-center gap-3 text-sam-text-dim">
+                  <Loader2 className="w-8 h-8 animate-spin text-sam-accent" />
+                  <p className="text-sm font-mono">Loading VM screen...</p>
+                </div>
+              )
             )
           ) : (
             <div className="flex flex-col items-center gap-3 text-sam-text-dim">
@@ -1920,111 +1990,106 @@ function ComputerConnectedView({
         </div>
       </div>
 
-      {/* Computer Connected Card (Right Column - 1/3 width) */}
-      <div className="lg:col-span-1 p-6 rounded-2xl border border-sam-accent/30 bg-sam-accent/5 backdrop-blur flex flex-col">
-        <div className="flex items-start justify-between mb-6">
-          <div className="flex items-start gap-4 flex-1">
-            <div className="w-12 h-12 rounded-xl bg-sam-accent/20 flex items-center justify-center flex-shrink-0">
-              <CheckCircle2 className="w-6 h-6 text-sam-accent" />
-            </div>
-            <div className="flex-1">
-              <h2 className="text-xl font-display font-bold mb-1">
-                <span className="text-gradient">Computer Connected</span>
-              </h2>
-              <p className="text-sm text-sam-text-dim mb-4">
-                Your VM is running and ready to use.
-              </p>
-            </div>
+      {/* Computer Connected Card (Right Column - 1/4 width) */}
+      <div className="lg:col-span-1 p-4 rounded-2xl border border-sam-accent/30 bg-sam-accent/5 backdrop-blur flex flex-col h-fit">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-xl bg-sam-accent/20 flex items-center justify-center flex-shrink-0">
+            <CheckCircle2 className="w-5 h-5 text-sam-accent" />
+          </div>
+          <div>
+            <h2 className="text-lg font-display font-bold leading-tight">
+              <span className="text-gradient">Computer Connected</span>
+            </h2>
+            <p className="text-xs text-sam-text-dim">
+              Your VM is running and ready to use.
+            </p>
           </div>
         </div>
 
-        <div className="space-y-3 mb-6">
-          {/* AWS Console Link */}
+        <div className="space-y-2 mb-4">
+          {/* Console Links */}
           {setupStatus.vmProvider === 'aws' && setupStatus.awsInstanceId && (
             <a
               href={`https://${setupStatus.awsRegion || 'us-east-1'}.console.aws.amazon.com/ec2/home?region=${setupStatus.awsRegion || 'us-east-1'}#InstanceDetails:instanceId=${setupStatus.awsInstanceId}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-2 px-4 py-2 rounded-lg border border-sam-border bg-sam-surface hover:border-sam-accent transition-all w-full"
+              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-sam-border bg-sam-surface hover:border-sam-accent transition-all w-full text-xs"
             >
-              <Server className="w-4 h-4 text-sam-accent" />
-              <span className="font-mono text-sm">AWS Console</span>
-              <ExternalLink className="w-4 h-4 text-sam-text-dim ml-auto" />
+              <Server className="w-3.5 h-3.5 text-sam-accent" />
+              <span className="font-mono">AWS Console</span>
+              <ExternalLink className="w-3 h-3 text-sam-text-dim ml-auto" />
             </a>
           )}
-          {/* Orgo Console Link */}
           {setupStatus.vmProvider === 'orgo' && setupStatus.orgoComputerUrl && (
             <a
               href={setupStatus.orgoComputerUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-2 px-4 py-2 rounded-lg border border-sam-border bg-sam-surface hover:border-sam-accent transition-all w-full"
+              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-sam-border bg-sam-surface hover:border-sam-accent transition-all w-full text-xs"
             >
-              <Server className="w-4 h-4 text-sam-accent" />
-              <span className="font-mono text-sm">Open VM Console</span>
-              <ExternalLink className="w-4 h-4 text-sam-text-dim ml-auto" />
+              <Server className="w-3.5 h-3.5 text-sam-accent" />
+              <span className="font-mono">Open VM Console</span>
+              <ExternalLink className="w-3 h-3 text-sam-text-dim ml-auto" />
             </a>
           )}
-          {/* E2B Sandbox Info */}
           {setupStatus.vmProvider === 'e2b' && setupStatus.e2bSandboxId && (
-            <div className="flex items-center gap-2 px-4 py-2 rounded-lg border border-sam-border bg-sam-surface w-full">
-              <Server className="w-4 h-4 text-sam-accent" />
-              <span className="font-mono text-sm truncate" title={setupStatus.e2bSandboxId}>
-                Sandbox: {setupStatus.e2bSandboxId.slice(0, 12)}...
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-sam-border bg-sam-surface w-full text-xs">
+              <Server className="w-3.5 h-3.5 text-sam-accent" />
+              <span className="font-mono truncate" title={setupStatus.e2bSandboxId}>
+                {setupStatus.e2bSandboxId.slice(0, 12)}...
               </span>
             </div>
           )}
         </div>
 
-        <div className="pt-4 border-t border-sam-border/50 mb-4">
-          <h3 className="font-display font-semibold mb-3 text-sm text-sam-text">Setup Complete</h3>
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-xs">
+        {/* Setup Status - Compact */}
+        <div className="pt-3 border-t border-sam-border/50 mb-3">
+          <h3 className="font-display font-semibold mb-2 text-xs text-sam-text-dim uppercase tracking-wide">Status</h3>
+          <div className="grid grid-cols-2 gap-1.5">
+            <div className="flex items-center gap-1.5 text-[10px]">
               <CheckCircle2 className="w-3 h-3 text-green-500 flex-shrink-0" />
-              <span className="text-sam-text-dim">VM Created</span>
+              <span className="text-sam-text-dim">VM</span>
             </div>
-            <div className="flex items-center gap-2 text-xs">
+            <div className="flex items-center gap-1.5 text-[10px]">
               <CheckCircle2 className="w-3 h-3 text-green-500 flex-shrink-0" />
-              <span className="text-sam-text-dim">Repository Ready</span>
+              <span className="text-sam-text-dim">Repo</span>
             </div>
-            <div className="flex items-center gap-2 text-xs">
+            <div className="flex items-center gap-1.5 text-[10px]">
               <CheckCircle2 className="w-3 h-3 text-green-500 flex-shrink-0" />
-              <span className="text-sam-text-dim">Git Sync Configured</span>
+              <span className="text-sam-text-dim">Git Sync</span>
             </div>
-            <div className="flex items-center gap-2 text-xs">
+            <div className="flex items-center gap-1.5 text-[10px]">
               {setupStatus.telegramConfigured && setupStatus.gatewayStarted ? (
                 <CheckCircle2 className="w-3 h-3 text-green-500 flex-shrink-0" />
               ) : (
                 <XCircle className="w-3 h-3 text-sam-text-dim flex-shrink-0" />
               )}
-              <span className={setupStatus.telegramConfigured && setupStatus.gatewayStarted ? 'text-sam-text-dim' : 'text-sam-text-dim'}>
-                Telegram {setupStatus.telegramConfigured && setupStatus.gatewayStarted ? 'Connected' : 'Not Configured'}
-              </span>
+              <span className="text-sam-text-dim">Telegram</span>
             </div>
           </div>
         </div>
 
         {/* Telegram Configuration */}
         {!setupStatus.telegramConfigured ? (
-          <div className="mb-4 p-4 rounded-lg border border-sam-border bg-sam-surface/30">
+          <div className="mb-3 p-3 rounded-lg border border-sam-border bg-sam-surface/30">
             {!showTelegramConfig ? (
               <button
                 onClick={() => setShowTelegramConfig(true)}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg border border-sam-accent text-sam-accent hover:bg-sam-accent/10 transition-all font-display font-medium text-sm"
+                className="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg border border-sam-accent text-sam-accent hover:bg-sam-accent/10 transition-all font-display font-medium text-xs"
               >
-                <MessageCircle className="w-4 h-4" />
+                <MessageCircle className="w-3.5 h-3.5" />
                 Configure Telegram
               </button>
             ) : (
-              <div className="space-y-3">
-                <h4 className="text-sm font-display font-semibold text-sam-text mb-2">Configure Telegram</h4>
+              <div className="space-y-2">
+                <h4 className="text-xs font-display font-semibold text-sam-text mb-1">Configure Telegram</h4>
                 {telegramError && (
                   <div className="p-2 rounded bg-sam-error/10 border border-sam-error/30 text-sam-error text-xs">
                     {telegramError}
                   </div>
                 )}
                 <div>
-                  <label className="block text-xs font-mono text-sam-text-dim mb-1">
+                  <label className="block text-[10px] font-mono text-sam-text-dim mb-0.5">
                     Bot Token <span className="text-sam-error">*</span>
                   </label>
                   <input
@@ -2032,22 +2097,22 @@ function ComputerConnectedView({
                     value={telegramBotToken}
                     onChange={(e) => setTelegramBotToken(e.target.value)}
                     placeholder="1234567890:ABCdef..."
-                    className="w-full px-3 py-2 rounded-lg bg-sam-bg border border-sam-border focus:border-sam-accent outline-none font-mono text-xs transition-colors"
+                    className="w-full px-2 py-1.5 rounded bg-sam-bg border border-sam-border focus:border-sam-accent outline-none font-mono text-[10px] transition-colors"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-mono text-sam-text-dim mb-1">
-                    User ID <span className="text-sam-text-dim text-xs">(Optional)</span>
+                  <label className="block text-[10px] font-mono text-sam-text-dim mb-0.5">
+                    User ID <span className="text-sam-text-dim">(Optional)</span>
                   </label>
                   <input
                     type="text"
                     value={telegramUserId}
                     onChange={(e) => setTelegramUserId(e.target.value)}
                     placeholder="123456789"
-                    className="w-full px-3 py-2 rounded-lg bg-sam-bg border border-sam-border focus:border-sam-accent outline-none font-mono text-xs transition-colors"
+                    className="w-full px-2 py-1.5 rounded bg-sam-bg border border-sam-border focus:border-sam-accent outline-none font-mono text-[10px] transition-colors"
                   />
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 pt-1">
                   <button
                     onClick={async () => {
                       if (!telegramBotToken.trim()) {
@@ -2074,7 +2139,6 @@ function ComputerConnectedView({
                         setShowTelegramConfig(false)
                         setTelegramBotToken('')
                         setTelegramUserId('')
-                        // Refresh status
                         if (onStatusUpdate) {
                           await onStatusUpdate()
                         } else {
@@ -2087,15 +2151,15 @@ function ComputerConnectedView({
                       }
                     }}
                     disabled={isConfiguringTelegram || !telegramBotToken.trim()}
-                    className="flex-1 px-3 py-2 rounded-lg bg-sam-accent text-sam-bg hover:bg-sam-accent-dim disabled:opacity-50 disabled:cursor-not-allowed transition-all font-display font-medium text-xs flex items-center justify-center gap-2"
+                    className="flex-1 px-2 py-1.5 rounded bg-sam-accent text-sam-bg hover:bg-sam-accent-dim disabled:opacity-50 disabled:cursor-not-allowed transition-all font-display font-medium text-[10px] flex items-center justify-center gap-1"
                   >
                     {isConfiguringTelegram ? (
                       <>
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                        Configuring...
+                        <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                        ...
                       </>
                     ) : (
-                      'Configure'
+                      'Save'
                     )}
                   </button>
                   <button
@@ -2105,19 +2169,19 @@ function ComputerConnectedView({
                       setTelegramUserId('')
                       setTelegramError(null)
                     }}
-                    className="px-3 py-2 rounded-lg border border-sam-border text-sam-text-dim hover:border-sam-error/50 hover:text-sam-error transition-all font-display font-medium text-xs"
+                    className="px-2 py-1.5 rounded border border-sam-border text-sam-text-dim hover:border-sam-error/50 hover:text-sam-error transition-all font-display font-medium text-[10px]"
                   >
-                    Cancel
+                    ✕
                   </button>
                 </div>
               </div>
             )}
           </div>
         ) : (
-          <div className="mb-4 p-3 rounded-lg border border-green-500/30 bg-green-500/10">
-            <div className="flex items-center gap-2 text-xs text-green-500">
-              <CheckCircle2 className="w-4 h-4" />
-              <span>Telegram connected and gateway running</span>
+          <div className="mb-3 p-2 rounded-lg border border-green-500/30 bg-green-500/10">
+            <div className="flex items-center gap-1.5 text-[10px] text-green-500">
+              <CheckCircle2 className="w-3 h-3" />
+              <span>Telegram connected</span>
             </div>
           </div>
         )}
@@ -2125,17 +2189,17 @@ function ComputerConnectedView({
         <button
           onClick={handleDelete}
           disabled={isDeleting}
-          className="mt-auto px-4 py-2 rounded-lg border border-sam-error/50 bg-sam-error/10 text-sam-error hover:bg-sam-error/20 transition-all font-display font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          className="mt-2 px-3 py-1.5 rounded-lg border border-sam-error/50 bg-sam-error/10 text-sam-error hover:bg-sam-error/20 transition-all font-display font-medium text-xs disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
         >
           {isDeleting ? (
             <>
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Loader2 className="w-3 h-3 animate-spin" />
               {setupStatus.vmProvider === 'aws' ? 'Terminating...' : 'Deleting...'}
             </>
           ) : (
             <>
-              <Trash2 className="w-4 h-4" />
-              {setupStatus.vmProvider === 'aws' ? 'Terminate Instance' : 'Delete Computer'}
+              <Trash2 className="w-3 h-3" />
+              {setupStatus.vmProvider === 'aws' ? 'Terminate' : 'Delete'}
             </>
           )}
         </button>
