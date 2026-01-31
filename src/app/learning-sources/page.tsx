@@ -1364,32 +1364,33 @@ function SetupProgressView({
       label: 'Provisioning VM',
       icon: Server,
       check: () => setupStatus?.vmCreated || false,
-      active: () => setupStatus?.status === 'provisioning'
+      active: () => setupStatus?.status === 'provisioning' || (setupStatus?.status !== 'ready' && setupStatus?.status !== 'failed' && !setupStatus?.vmCreated)
     },
     {
       id: 'clawdbot',
       label: 'Installing Clawdbot',
       icon: Bot,
       check: () => setupStatus?.clawdbotInstalled || false,
-      active: () => setupStatus?.status === 'configuring_vm' && setupStatus?.vmCreated && !setupStatus?.clawdbotInstalled
+      // Active when VM is created but clawdbot not installed, regardless of exact status value
+      active: () => (setupStatus?.vmCreated && !setupStatus?.clawdbotInstalled && setupStatus?.status !== 'failed') || false
     },
     {
       id: 'telegram',
       label: 'Configuring Telegram',
       icon: MessageCircle,
       check: () => setupStatus?.telegramConfigured || false,
-      active: () => setupStatus?.status === 'configuring_vm' && setupStatus?.clawdbotInstalled && !setupStatus?.telegramConfigured && !setupStatus?.gatewayStarted,
+      active: () => setupStatus?.clawdbotInstalled && !setupStatus?.telegramConfigured && !setupStatus?.gatewayStarted && setupStatus?.status !== 'failed',
       optional: true,
-      show: () => hasTelegramSetup || (setupStatus?.status === 'configuring_vm' && setupStatus?.clawdbotInstalled)
+      show: () => hasTelegramSetup || (setupStatus?.clawdbotInstalled && !setupStatus?.telegramConfigured)
     },
     {
       id: 'gateway',
       label: 'Starting Gateway',
       icon: Terminal,
       check: () => setupStatus?.gatewayStarted || false,
-      active: () => setupStatus?.status === 'configuring_vm' && setupStatus?.clawdbotInstalled && setupStatus?.telegramConfigured && !setupStatus?.gatewayStarted,
+      active: () => setupStatus?.clawdbotInstalled && setupStatus?.telegramConfigured && !setupStatus?.gatewayStarted && setupStatus?.status !== 'failed',
       optional: true,
-      show: () => hasTelegramSetup || (setupStatus?.status === 'configuring_vm' && setupStatus?.telegramConfigured)
+      show: () => hasTelegramSetup || setupStatus?.telegramConfigured
     },
     {
       id: 'complete',
@@ -1414,16 +1415,20 @@ function SetupProgressView({
     return 'pending'
   }
 
-  // Calculate progress based on completed steps (excluding optional ones if not started)
+  // Calculate progress based on completed steps + partial progress for active step
   const completedSteps = steps.filter(s => s.check()).length
-  const currentStepIndex = steps.findIndex(s => s.active())
+  const activeStepIndex = steps.findIndex(s => s.active() && !s.check())
+  
+  // Calculate progress: completed steps + half credit for active step
   const progressPercentage = setupStatus?.status === 'ready'
     ? 100
-    : currentStepIndex >= 0
-      ? Math.round(((completedSteps) / steps.length) * 100)
-      : completedSteps > 0
-        ? Math.round((completedSteps / steps.length) * 100)
-        : 0
+    : setupStatus?.status === 'failed'
+      ? Math.round((completedSteps / steps.length) * 100)
+      : activeStepIndex >= 0
+        ? Math.round(((completedSteps + 0.5) / steps.length) * 100)
+        : completedSteps > 0
+          ? Math.round((completedSteps / steps.length) * 100)
+          : 5 // Show minimal progress to indicate something is happening
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
