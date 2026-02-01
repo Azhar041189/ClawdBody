@@ -39,14 +39,6 @@ export class OrgoClient {
     return computerId.startsWith('orgo-') ? computerId.slice(5) : computerId
   }
 
-  /**
-   * Format computer ID for delete endpoint - Orgo's delete API requires the 'orgo-' prefix
-   */
-  private formatComputerIdForDelete(computerId: string): string {
-    const normalized = this.normalizeComputerId(computerId)
-    return `orgo-${normalized}`
-  }
-
   private async request<T>(
     endpoint: string,
     options: RequestInit = {},
@@ -198,10 +190,9 @@ export class OrgoClient {
 
   /**
    * Delete a computer
-   * Note: Orgo's delete endpoint requires the 'orgo-' prefix unlike other endpoints
    */
   async deleteComputer(computerId: string): Promise<void> {
-    await this.request(`/computers/${this.formatComputerIdForDelete(computerId)}`, { method: 'DELETE' })
+    await this.request(`/computers/${this.normalizeComputerId(computerId)}`, { method: 'DELETE' })
   }
 
   /**
