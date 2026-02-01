@@ -200,3 +200,50 @@ model Integration {
 
   @@unique([userId, provider])
 }
+
+// Template Marketplace - User-uploaded templates
+// Built-in templates are defined in code (src/lib/templates.ts)
+model MarketplaceTemplate {
+  id          String   @id @default(cuid())
+  
+  // Template identification
+  templateId  String   @unique  // Unique slug like "my-agent-template"
+  name        String
+  description String   @db.Text
+  logo        String?            // URL to logo image
+  category    String             // social, productivity, dev-tools, other
+  
+  // Author info
+  authorId    String?            // User who uploaded (null for built-in)
+  authorName  String?
+  
+  // VM configuration (stored as JSON)
+  vmConfig    String   @db.Text  // JSON: { provider, minRam, recommendedRam }
+  
+  // Setup configuration (stored as JSON)
+  setup       String   @db.Text  // JSON: { commands: string[] }
+  
+  // Optional registration API (stored as JSON)
+  registration String? @db.Text  // JSON: { endpoint, method, headers, bodyTemplate, responseMapping }
+  
+  // Optional credentials config (stored as JSON)
+  credentials String?  @db.Text  // JSON: { path, template }
+  
+  // Post-setup config (stored as JSON)
+  postSetup   String?  @db.Text  // JSON: { type, message }
+  
+  // Metadata
+  websiteUrl  String?
+  isPublic    Boolean  @default(false)  // Whether visible to all users
+  isVerified  Boolean  @default(false)  // Reviewed and approved
+  
+  // Stats
+  deployCount Int      @default(0)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([category])
+  @@index([authorId])
+  @@index([isPublic, isVerified])
+}
