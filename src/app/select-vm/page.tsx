@@ -4,7 +4,8 @@ import { useState, useEffect } from 'react'
 import { useSession, signOut } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Loader2, ArrowRight, CheckCircle2, LogOut, X, Key, FolderPlus, AlertCircle, ExternalLink, Globe, Server, Plus, Trash2, Play, Power, ArrowLeft, ExternalLinkIcon, Settings } from 'lucide-react'
+import { Loader2, ArrowRight, CheckCircle2, LogOut, X, Key, FolderPlus, AlertCircle, ExternalLink, Globe, Server, Plus, Trash2, Play, Power, ArrowLeft, ExternalLinkIcon, Settings, Rocket, ChevronDown, ChevronUp, Sparkles } from 'lucide-react'
+import type { Template } from '@/lib/templates'
 
 type VMProvider = 'orgo' | 'e2b' | 'moltworker' | 'flyio' | 'aws' | 'railway' | 'digitalocean' | 'hetzner' | 'modal'
 
@@ -86,10 +87,18 @@ interface OrgoRAMOption {
 
 const orgoRAMOptions: OrgoRAMOption[] = [
   { id: 4, name: '4 GB', description: 'Standard workloads', freeTier: true },
-  { id: 8, name: '8 GB', description: 'AI & development', freeTier: false }, // Requires Pro plan
-  { id: 16, name: '16 GB', description: 'Heavy workloads', freeTier: false, recommended: true }, // Requires Pro plan
+  { id: 8, name: '8 GB', description: 'AI & development', freeTier: false, recommended: true }, // Requires Pro plan
+  { id: 16, name: '16 GB', description: 'Heavy workloads', freeTier: false }, // Requires Pro plan
   { id: 32, name: '32 GB', description: 'Large datasets', freeTier: false },  // Requires Pro plan
 ]
+
+// Category display names and colors
+const categoryConfig: Record<string, { label: string; color: string }> = {
+  social: { label: 'Social', color: 'text-pink-400 bg-pink-400/10' },
+  productivity: { label: 'Productivity', color: 'text-blue-400 bg-blue-400/10' },
+  'dev-tools': { label: 'Dev Tools', color: 'text-green-400 bg-green-400/10' },
+  other: { label: 'Other', color: 'text-gray-400 bg-gray-400/10' },
+}
 
 // Auto-select CPU cores based on RAM
 const getOrgoCPUForRAM = (ram: number): number => {
@@ -238,10 +247,35 @@ export default function SelectVMPage() {
   const [e2bError, setE2bError] = useState<string | null>(null)
   const [e2bVMName, setE2bVMName] = useState('')
 
-  // Load user's VMs and credentials
+  // Template Marketplace state
+  const [templates, setTemplates] = useState<Template[]>([])
+  const [isLoadingTemplates, setIsLoadingTemplates] = useState(true)
+  const [showAllTemplates, setShowAllTemplates] = useState(false)
+  const [showTemplateDeployModal, setShowTemplateDeployModal] = useState(false)
+  const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
+  const [templateAgentName, setTemplateAgentName] = useState('')
+  const [selectedTemplateRAM, setSelectedTemplateRAM] = useState(8)
+  const [templateError, setTemplateError] = useState<string | null>(null)
+  const [isDeployingTemplate, setIsDeployingTemplate] = useState(false)
+  const [deploymentProgress, setDeploymentProgress] = useState<string | null>(null)
+  const [isLoadingProjectsForTemplate, setIsLoadingProjectsForTemplate] = useState(false)
+  const [selectedTemplateProject, setSelectedTemplateProject] = useState<OrgoProject | null>(null)
+  
+  // Template success modal state
+  const [showTemplateSuccessModal, setShowTemplateSuccessModal] = useState(false)
+  const [deployedVM, setDeployedVM] = useState<any>(null)
+  const [postSetupData, setPostSetupData] = useState<{
+    type: string
+    message?: string
+    claimUrl?: string
+    verificationCode?: string
+  } | null>(null)
+
+  // Load user's VMs, credentials, and templates
   useEffect(() => {
     if (session?.user?.id) {
       loadVMs()
+      loadTemplates()
     }
   }, [session?.user?.id])
 
@@ -258,6 +292,134 @@ export default function SelectVMPage() {
     } finally {
       setIsLoadingVMs(false)
     }
+  }
+
+  const loadTemplates = async () => {
+    setIsLoadingTemplates(true)
+    try {
+      const res = await fetch('/api/templates')
+      const data = await res.json()
+      if (res.ok) {
+        setTemplates(data.templates || [])
+      }
+    } catch (e) {
+      console.error('Failed to load templates:', e)
+    } finally {
+      setIsLoadingTemplates(false)
+    }
+  }
+
+  const handleTemplateClick = async (template: Template) => {
+    // Check if Orgo is configured (templates use Orgo VMs)
+    if (!credentials?.hasOrgoApiKey) {
+      setError('Please configure your Orgo API key first before deploying templates. Click on "Orgo" below to add your API key.')
+      return
+    }
+    
+    setSelectedTemplate(template)
+    setTemplateAgentName(generateDefaultAgentName(template.name))
+    setSelectedTemplateRAM(template.vmConfig.recommendedRam)
+    setTemplateError(null)
+    setSelectedTemplateProject(orgoProjects[0] || null) // Set default project
+    setShowTemplateDeployModal(true)
+    
+    // Fetch Orgo projects if not already loaded
+    if (orgoProjects.length === 0) {
+      setIsLoadingProjectsForTemplate(true)
+      try {
+        await fetchOrgoProjects()
+      } finally {
+        setIsLoadingProjectsForTemplate(false)
+      }
+    }
+  }
+
+  // Auto-select first project when projects are loaded for template modal
+  useEffect(() => {
+    if (showTemplateDeployModal && orgoProjects.length > 0 && !selectedTemplateProject) {
+      setSelectedTemplateProject(orgoProjects[0])
+    }
+  }, [orgoProjects, showTemplateDeployModal, selectedTemplateProject])
+
+  const generateDefaultAgentName = (templateName: string) => {
+    const base = templateName.replace(/[^a-zA-Z0-9]/g, '')
+    const suffix = Math.random().toString(36).substring(2, 6).toUpperCase()
+    return `${base}Agent_${suffix}`
+  }
+
+  const handleDeployTemplate = async () => {
+    if (!selectedTemplate) return
+    
+    if (!templateAgentName.trim()) {
+      setTemplateError('Please enter an agent name')
+      return
+    }
+
+    if (selectedTemplateRAM < selectedTemplate.vmConfig.minRam) {
+      setTemplateError(`Minimum RAM for this template is ${selectedTemplate.vmConfig.minRam} GB`)
+      return
+    }
+
+    // Check if we have a project selected
+    if (!selectedTemplateProject) {
+      setTemplateError('Please select an Orgo project')
+      return
+    }
+
+    setIsDeployingTemplate(true)
+    setTemplateError(null)
+    setDeploymentProgress('Creating VM and registering agent...')
+
+    try {
+      const res = await fetch('/api/templates/deploy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          templateId: selectedTemplate.id,
+          agentName: templateAgentName.trim(),
+          ram: selectedTemplateRAM,
+          orgoProjectId: selectedTemplateProject.id,
+          orgoProjectName: selectedTemplateProject.name,
+        }),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to deploy template')
+      }
+
+      // Success! Close deploy modal and show success modal
+      setShowTemplateDeployModal(false)
+      setDeployedVM(data.vm)
+      setPostSetupData(data.postSetup || null)
+      setShowTemplateSuccessModal(true)
+      
+      // Refresh VMs list
+      await loadVMs()
+      
+    } catch (e) {
+      setTemplateError(e instanceof Error ? e.message : 'Deployment failed')
+    } finally {
+      setIsDeployingTemplate(false)
+      setDeploymentProgress(null)
+    }
+  }
+
+  const closeTemplateDeployModal = () => {
+    setShowTemplateDeployModal(false)
+    setSelectedTemplate(null)
+    setTemplateAgentName('')
+    setSelectedTemplateRAM(8)
+    setTemplateError(null)
+    setDeploymentProgress(null)
+    setSelectedTemplateProject(null)
+  }
+
+  const closeTemplateSuccessModal = () => {
+    setShowTemplateSuccessModal(false)
+    setDeployedVM(null)
+    setPostSetupData(null)
   }
 
   useEffect(() => {
@@ -1001,6 +1163,122 @@ export default function SelectVMPage() {
             </div>
           </motion.div>
         )}
+
+        {/* Template Marketplace Section */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.15 }}
+          className="mb-8"
+        >
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-xl font-display font-semibold text-sam-text flex items-center gap-2">
+                <Rocket className="w-5 h-5 text-sam-accent" />
+                Template Marketplace
+              </h2>
+              <p className="text-sm text-sam-text-dim mt-1">
+                Deploy AI agents and workflows with one click
+              </p>
+            </div>
+            {templates.length > 5 && (
+              <button
+                onClick={() => setShowAllTemplates(!showAllTemplates)}
+                className="flex items-center gap-1 text-sm text-sam-accent hover:text-sam-accent/80 transition-colors"
+              >
+                {showAllTemplates ? (
+                  <>Show less <ChevronUp className="w-4 h-4" /></>
+                ) : (
+                  <>Show all {templates.length} <ChevronDown className="w-4 h-4" /></>
+                )}
+              </button>
+            )}
+          </div>
+
+          {isLoadingTemplates ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="w-6 h-6 animate-spin text-sam-accent" />
+            </div>
+          ) : templates.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {(showAllTemplates ? templates : templates.slice(0, 5)).map((template, index) => (
+                <motion.div
+                  key={template.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3, delay: 0.05 * index }}
+                  className={`group relative p-5 rounded-xl border border-sam-border bg-sam-surface/50 transition-all ${
+                    template.comingSoon 
+                      ? 'opacity-75 cursor-not-allowed' 
+                      : 'hover:border-sam-accent/50 hover:bg-sam-surface/70 cursor-pointer'
+                  }`}
+                  onClick={() => !template.comingSoon && handleTemplateClick(template)}
+                >
+
+                  {/* Template Logo and Info */}
+                  <div className="flex items-start gap-4 mb-4">
+                    <div className="w-12 h-12 rounded-xl bg-sam-bg flex items-center justify-center overflow-hidden flex-shrink-0">
+                      <img
+                        src={template.logo}
+                        alt={template.name}
+                        className="w-10 h-10 object-contain"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = '/logos/orgo.png'
+                        }}
+                      />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h3 className="font-display font-semibold text-sam-text truncate">
+                          {template.name}
+                        </h3>
+                      </div>
+                      <span className={`inline-block text-[10px] font-mono px-1.5 py-0.5 rounded ${categoryConfig[template.category]?.color || categoryConfig.other.color}`}>
+                        {categoryConfig[template.category]?.label || 'Other'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Description */}
+                  <p className="text-sm text-sam-text-dim line-clamp-2 mb-4">
+                    {template.description}
+                  </p>
+
+                  {/* Footer */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-xs text-sam-text-dim">
+                      <Server className="w-3 h-3" />
+                      <span>Min {template.vmConfig.minRam} GB RAM</span>
+                    </div>
+                    {template.comingSoon ? (
+                      <span className="px-3 py-1.5 rounded-lg bg-sam-surface border border-sam-border text-sam-text-dim text-sm font-medium">
+                        Coming Soon
+                      </span>
+                    ) : (
+                      <button
+                        className="px-3 py-1.5 rounded-lg bg-sam-accent/10 border border-sam-accent/30 text-sam-accent text-sm font-medium hover:bg-sam-accent/20 hover:border-sam-accent/50 transition-all flex items-center gap-1.5"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        Deploy
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Hover effect indicator */}
+                  {!template.comingSoon && (
+                    <div className="absolute inset-0 rounded-xl bg-sam-accent/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+                  )}
+                </motion.div>
+              ))}
+            </div>
+          ) : (
+            <div className="p-8 rounded-xl border border-sam-border bg-sam-surface/30 text-center">
+              <Rocket className="w-12 h-12 text-sam-text-dim mx-auto mb-3" />
+              <p className="text-sam-text-dim">No templates available yet</p>
+              <p className="text-sm text-sam-text-dim/60 mt-1">Check back soon for new AI agent templates</p>
+            </div>
+          )}
+        </motion.div>
 
         {/* Add New VM Section */}
         <motion.div
@@ -2120,6 +2398,378 @@ export default function SelectVMPage() {
                     </>
                   )}
                 </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Template Deploy Modal */}
+      <AnimatePresence>
+        {showTemplateDeployModal && selectedTemplate && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+            onClick={closeTemplateDeployModal}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ duration: 0.2 }}
+              className="bg-sam-surface border border-sam-border rounded-2xl w-full max-w-lg overflow-hidden max-h-[90vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div className="flex items-center justify-between p-6 border-b border-sam-border sticky top-0 bg-sam-surface z-10">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-sam-bg flex items-center justify-center overflow-hidden">
+                    <img
+                      src={selectedTemplate.logo}
+                      alt={selectedTemplate.name}
+                      className="w-8 h-8 object-contain"
+                    />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-display font-semibold text-sam-text">
+                      Deploy {selectedTemplate.name}
+                    </h2>
+                    <p className="text-xs text-sam-text-dim">
+                      {categoryConfig[selectedTemplate.category]?.label || 'Template'}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={closeTemplateDeployModal}
+                  className="p-2 rounded-lg hover:bg-sam-bg transition-colors text-sam-text-dim hover:text-sam-text"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Modal Body */}
+              <div className="p-6 space-y-6">
+                {/* Template Description */}
+                <div className="p-4 rounded-lg bg-sam-bg/50 border border-sam-border">
+                  <p className="text-sm text-sam-text-dim">{selectedTemplate.description}</p>
+                  {selectedTemplate.websiteUrl && (
+                    <a
+                      href={selectedTemplate.websiteUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-2 inline-flex items-center gap-1 text-xs text-sam-accent hover:text-sam-accent/80"
+                    >
+                      Learn more <ExternalLink className="w-3 h-3" />
+                    </a>
+                  )}
+                </div>
+
+                {/* Agent Name Input */}
+                <div className="space-y-3">
+                  <label className="text-sm font-medium text-sam-text flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-sam-accent" />
+                    Agent Name
+                    <span className="text-sam-error">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={templateAgentName}
+                    onChange={(e) => setTemplateAgentName(e.target.value)}
+                    placeholder="e.g., MyAwesomeAgent"
+                    className="w-full px-4 py-2.5 rounded-lg bg-sam-bg border border-sam-border focus:border-sam-accent focus:ring-1 focus:ring-sam-accent/30 transition-all text-sam-text placeholder:text-sam-text-dim/50 text-sm"
+                  />
+                  <p className="text-xs text-sam-text-dim">
+                    This name will be used to register your agent with {selectedTemplate.name}
+                  </p>
+                </div>
+
+                {/* Project Selection */}
+                <div className="space-y-3">
+                  <label className="text-sm font-medium text-sam-text flex items-center gap-2">
+                    <FolderPlus className="w-4 h-4 text-sam-accent" />
+                    Orgo Project
+                    <span className="text-sam-error">*</span>
+                  </label>
+                  {isLoadingProjectsForTemplate ? (
+                    <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-sam-bg border border-sam-border text-sam-text-dim">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span className="text-sm">Loading projects...</span>
+                    </div>
+                  ) : orgoProjects.length > 0 ? (
+                    <div className="space-y-2">
+                      {orgoProjects.map((project) => (
+                        <button
+                          key={project.id}
+                          onClick={() => setSelectedTemplateProject(project)}
+                          className={`w-full p-3 rounded-lg border text-left transition-all ${
+                            selectedTemplateProject?.id === project.id
+                              ? 'border-sam-accent bg-sam-accent/10'
+                              : 'border-sam-border hover:border-sam-accent/50 hover:bg-sam-bg'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-sam-text font-medium text-sm">{project.name}</span>
+                            {selectedTemplateProject?.id === project.id && (
+                              <CheckCircle2 className="w-4 h-4 text-sam-accent" />
+                            )}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="px-4 py-3 rounded-lg bg-sam-bg border border-sam-border text-sam-text-dim text-sm">
+                      No projects found. Create one via the Orgo option in Add New VM.
+                    </div>
+                  )}
+                </div>
+
+                {/* RAM Selection */}
+                <div className="space-y-3">
+                  <label className="text-sm font-medium text-sam-text flex items-center gap-2">
+                    <Server className="w-4 h-4 text-sam-accent" />
+                    Memory (RAM)
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {orgoRAMOptions.map((option) => {
+                      const isDisabled = option.id < selectedTemplate.vmConfig.minRam
+                      return (
+                        <button
+                          key={option.id}
+                          onClick={() => !isDisabled && setSelectedTemplateRAM(option.id)}
+                          disabled={isDisabled}
+                          className={`p-2.5 rounded-lg border text-left transition-all flex flex-col justify-center ${
+                            isDisabled
+                              ? 'border-sam-border/50 opacity-40 cursor-not-allowed'
+                              : selectedTemplateRAM === option.id
+                              ? 'border-sam-accent bg-sam-accent/10'
+                              : 'border-sam-border hover:border-sam-accent/50 hover:bg-sam-bg'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-0.5">
+                            <span className="text-sam-text font-medium text-sm">{option.name}</span>
+                            {option.id === selectedTemplate.vmConfig.recommendedRam && (
+                              <span className="text-[9px] font-mono text-sam-accent bg-sam-accent/10 px-1 py-0.5 rounded">
+                                Best
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-sam-text-dim">
+                            {option.description}
+                          </div>
+                          <div className={`text-[10px] mt-1 font-medium ${option.freeTier ? 'text-green-400' : 'text-amber-400'}`}>
+                            {option.freeTier ? 'Free Tier' : 'Paid Plan'}
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {/* Pro Plan Notice */}
+                {!orgoRAMOptions.find(opt => opt.id === selectedTemplateRAM)?.freeTier && (
+                  <div className="p-4 rounded-lg bg-blue-500/10 border border-blue-500/30">
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-blue-400 font-medium">Pro Plan Feature</p>
+                        <p className="text-blue-400/80 text-sm mt-1">
+                          {orgoRAMOptions.find(opt => opt.id === selectedTemplateRAM)?.name} RAM requires an Orgo Pro plan.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Deployment Progress */}
+                {deploymentProgress && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    className="p-4 rounded-lg bg-sam-accent/10 border border-sam-accent/30"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Loader2 className="w-5 h-5 text-sam-accent animate-spin" />
+                      <div>
+                        <p className="text-sam-accent font-medium text-sm">{deploymentProgress}</p>
+                        <p className="text-sam-accent/70 text-xs mt-0.5">This may take a few minutes...</p>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* Loading Projects Notice */}
+                {isLoadingProjectsForTemplate && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    className="p-3 rounded-lg bg-sam-accent/10 border border-sam-accent/30 flex items-center gap-2"
+                  >
+                    <Loader2 className="w-4 h-4 text-sam-accent animate-spin flex-shrink-0" />
+                    <p className="text-sam-accent text-sm">Loading Orgo projects...</p>
+                  </motion.div>
+                )}
+
+
+                {/* Error Display */}
+                {templateError && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    className="p-3 rounded-lg bg-sam-error/10 border border-sam-error/30 flex items-start gap-2"
+                  >
+                    <AlertCircle className="w-4 h-4 text-sam-error flex-shrink-0 mt-0.5" />
+                    <p className="text-sam-error text-sm">{templateError}</p>
+                  </motion.div>
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div className="p-6 border-t border-sam-border flex justify-end gap-3 sticky bottom-0 bg-sam-surface">
+                <button
+                  onClick={closeTemplateDeployModal}
+                  disabled={isDeployingTemplate}
+                  className="px-5 py-2.5 rounded-lg border border-sam-border text-sam-text-dim hover:text-sam-text hover:border-sam-accent/50 font-medium text-sm transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeployTemplate}
+                  disabled={isDeployingTemplate || isLoadingProjectsForTemplate || !templateAgentName.trim() || !selectedTemplateProject}
+                  className="px-5 py-2.5 rounded-lg bg-sam-accent text-sam-bg font-medium text-sm hover:bg-sam-accent/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {isDeployingTemplate ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Deploying...
+                    </>
+                  ) : isLoadingProjectsForTemplate ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Loading...
+                    </>
+                  ) : (
+                    <>
+                      <Rocket className="w-4 h-4" />
+                      Deploy Agent
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Template Success Modal */}
+      <AnimatePresence>
+        {showTemplateSuccessModal && deployedVM && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+            onClick={closeTemplateSuccessModal}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ duration: 0.2 }}
+              className="bg-sam-surface border border-sam-border rounded-2xl w-full max-w-md overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Success Animation */}
+              <div className="p-8 text-center">
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ type: 'spring', delay: 0.1, duration: 0.5 }}
+                  className="w-20 h-20 rounded-full bg-sam-accent/20 flex items-center justify-center mx-auto mb-6"
+                >
+                  <CheckCircle2 className="w-10 h-10 text-sam-accent" />
+                </motion.div>
+                
+                <motion.h2
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.2 }}
+                  className="text-2xl font-display font-bold text-sam-text mb-2"
+                >
+                  Agent Deployed!
+                </motion.h2>
+                
+                <motion.p
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.3 }}
+                  className="text-sam-text-dim mb-6"
+                >
+                  {deployedVM.name} is now running
+                </motion.p>
+
+                {/* Post-Setup Action (Claim URL) */}
+                {postSetupData?.type === 'claimUrl' && postSetupData.claimUrl && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.4 }}
+                    className="p-4 rounded-xl bg-sam-bg border border-sam-border mb-6 text-left"
+                  >
+                    <div className="flex items-start gap-3 mb-3">
+                      <div className="w-8 h-8 rounded-lg bg-sam-accent/10 flex items-center justify-center flex-shrink-0">
+                        <ExternalLink className="w-4 h-4 text-sam-accent" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-sam-text text-sm">One more step!</p>
+                        <p className="text-xs text-sam-text-dim mt-0.5">
+                          {postSetupData.message || 'Verify your agent ownership to activate it.'}
+                        </p>
+                      </div>
+                    </div>
+                    {postSetupData.verificationCode && (
+                      <div className="mb-3 p-2 rounded-lg bg-sam-surface border border-sam-border">
+                        <p className="text-xs text-sam-text-dim mb-1">Verification Code:</p>
+                        <p className="font-mono text-sm text-sam-accent">{postSetupData.verificationCode}</p>
+                      </div>
+                    )}
+                    <a
+                      href={postSetupData.claimUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-sam-accent text-sam-bg font-medium text-sm hover:bg-sam-accent/90 transition-colors"
+                    >
+                      Claim Your Agent
+                      <ExternalLink className="w-4 h-4" />
+                    </a>
+                  </motion.div>
+                )}
+
+                {/* Action Buttons */}
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.5 }}
+                  className="flex gap-3"
+                >
+                  <button
+                    onClick={closeTemplateSuccessModal}
+                    className="flex-1 px-4 py-2.5 rounded-lg border border-sam-border text-sam-text-dim hover:text-sam-text hover:border-sam-accent/50 font-medium text-sm transition-colors"
+                  >
+                    Close
+                  </button>
+                  <button
+                    onClick={() => {
+                      closeTemplateSuccessModal()
+                      router.push(`/learning-sources?vmId=${deployedVM.id}`)
+                    }}
+                    className="flex-1 px-4 py-2.5 rounded-lg bg-sam-accent/10 border border-sam-accent/30 text-sam-accent font-medium text-sm hover:bg-sam-accent/20 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Settings className="w-4 h-4" />
+                    Open VM
+                  </button>
+                </motion.div>
               </div>
             </motion.div>
           </motion.div>

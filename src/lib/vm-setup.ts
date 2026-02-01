@@ -974,6 +974,19 @@ During heartbeat, check the following:
       'Create HEARTBEAT.md checklist'
     )
 
+    // === TEMPLATE INTEGRATION ===
+    // Copy any staged skills from ~/.openclaw/skills/ (from template deployments)
+    await this.runCommand(
+      'if [ -d ~/.openclaw/skills ] && [ "$(ls -A ~/.openclaw/skills 2>/dev/null)" ]; then mkdir -p /home/user/clawd/skills && cp -r ~/.openclaw/skills/* /home/user/clawd/skills/; fi',
+      'Copy staged template skills to workspace'
+    )
+
+    // Append any staged heartbeat additions (from template deployments)
+    await this.runCommand(
+      'if [ -d ~/.openclaw/heartbeat-additions ] && [ "$(ls -A ~/.openclaw/heartbeat-additions 2>/dev/null)" ]; then for f in ~/.openclaw/heartbeat-additions/*.md; do echo "" >> /home/user/clawd/HEARTBEAT.md && cat "$f" >> /home/user/clawd/HEARTBEAT.md; done; fi',
+      'Append staged heartbeat additions'
+    )
+
     // Create config JSON with heartbeat under agents.defaults (correct location)
     const configJson = `{
   "meta": {

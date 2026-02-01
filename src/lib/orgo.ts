@@ -146,16 +146,22 @@ export class OrgoClient {
       cpu?: 1 | 2 | 4 | 8 | 16
     } = {}
   ): Promise<OrgoComputer> {
-    return this.request<OrgoComputer>('/computers', {
+    const requestBody = {
+      project_id: projectId,
+      name: computerName,
+      os: options.os || 'linux',
+      ram: options.ram || 4,
+      cpu: options.cpu || 2,
+    }
+    console.log('[Orgo] createComputer request body:', JSON.stringify(requestBody, null, 2))
+    
+    const result = await this.request<OrgoComputer>('/computers', {
       method: 'POST',
-      body: JSON.stringify({
-        project_id: projectId,
-        name: computerName,
-        os: options.os || 'linux',
-        ram: options.ram || 4,
-        cpu: options.cpu || 2,
-      }),
+      body: JSON.stringify(requestBody),
     })
+    
+    console.log('[Orgo] createComputer response:', JSON.stringify(result, null, 2))
+    return result
   }
 
   /**
