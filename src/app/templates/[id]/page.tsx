@@ -197,6 +197,23 @@ export default function TemplatePage() {
     }
   }
 
+  // Log share events
+  const logShareEvent = async (shareMethod: 'twitter' | 'linkedin' | 'email' | 'copy_link') => {
+    try {
+      await fetch('/api/templates/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          templateId,
+          eventType: 'share',
+          metadata: { shareMethod },
+        }),
+      })
+    } catch (e) {
+      console.warn('Failed to log share event:', e)
+    }
+  }
+
   const handleDeployClick = () => {
     if (!session?.user) {
       // Redirect to login with callback
@@ -1103,6 +1120,7 @@ export default function TemplatePage() {
                       navigator.clipboard.writeText(url)
                       setCopied(true)
                       setTimeout(() => setCopied(false), 2000)
+                      logShareEvent('copy_link')
                     }}
                     className="w-full p-4 rounded-xl border border-sam-border hover:border-sam-accent/50 hover:bg-sam-bg/50 transition-all flex items-center gap-4"
                   >
@@ -1126,6 +1144,7 @@ export default function TemplatePage() {
                     href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(`This ${template.name} AI agent template is insane.\n\n${template.description}\n\nCheck it out on ClawdBody.`)}&url=${encodeURIComponent(`${typeof window !== 'undefined' ? window.location.origin : 'https://clawdbody.com'}/templates/${templateId}`)}`}
                     target="_blank"
                     rel="noopener noreferrer"
+                    onClick={() => logShareEvent('twitter')}
                     className="w-full p-4 rounded-xl border border-sam-border hover:border-sam-accent/50 hover:bg-sam-bg/50 transition-all flex items-center gap-4"
                   >
                     <div className="w-10 h-10 rounded-lg bg-sam-bg flex items-center justify-center flex-shrink-0">
@@ -1145,6 +1164,7 @@ export default function TemplatePage() {
                     href={`https://www.linkedin.com/feed/?shareActive=true&text=${encodeURIComponent(`Just found this ${template.name} AI agent template and had to share.\n${template.description}\n\nIt's available on ClawdBody.\n\nWhat workflows are you automating with AI agents?`)}&url=${encodeURIComponent(`${typeof window !== 'undefined' ? window.location.origin : 'https://clawdbody.com'}/templates/${templateId}`)}`}
                     target="_blank"
                     rel="noopener noreferrer"
+                    onClick={() => logShareEvent('linkedin')}
                     className="w-full p-4 rounded-xl border border-sam-border hover:border-sam-accent/50 hover:bg-sam-bg/50 transition-all flex items-center gap-4"
                   >
                     <div className="w-10 h-10 rounded-lg bg-sam-bg flex items-center justify-center flex-shrink-0">
@@ -1162,6 +1182,7 @@ export default function TemplatePage() {
                   {/* Share via Email */}
                   <a
                     href={`mailto:?subject=${encodeURIComponent(`${template.name} — AI agent template I found to automate entire workflow`)}&body=${encodeURIComponent(`Hey,\n\nFound this AI agent template and thought you might find it useful:\n\n${template.name}\n${template.description}\n\nIt's available on ClawdBody:\n${typeof window !== 'undefined' ? window.location.origin : 'https://clawdbody.com'}/templates/${templateId}`)}`}
+                    onClick={() => logShareEvent('email')}
                     className="w-full p-4 rounded-xl border border-sam-border hover:border-sam-accent/50 hover:bg-sam-bg/50 transition-all flex items-center gap-4"
                   >
                     <div className="w-10 h-10 rounded-lg bg-sam-bg flex items-center justify-center flex-shrink-0">

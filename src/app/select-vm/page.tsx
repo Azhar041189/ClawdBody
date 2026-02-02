@@ -250,8 +250,10 @@ export default function SelectVMPage() {
 
   // Template Marketplace state
   const [templates, setTemplates] = useState<Template[]>([])
+  const [trendingTemplates, setTrendingTemplates] = useState<(Template & { stats?: { deployCount: number; shareCount: number; recentActivity: number } })[]>([])
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(true)
-  const [showAllTemplates, setShowAllTemplates] = useState(false)
+  const [templatePage, setTemplatePage] = useState(0)
+  const TEMPLATES_PER_PAGE = 6
   const [showTemplateDeployModal, setShowTemplateDeployModal] = useState(false)
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
   const [templateAgentName, setTemplateAgentName] = useState('')
@@ -312,10 +314,21 @@ export default function SelectVMPage() {
   const loadTemplates = async () => {
     setIsLoadingTemplates(true)
     try {
-      const res = await fetch('/api/templates')
-      const data = await res.json()
-      if (res.ok) {
-        setTemplates(data.templates || [])
+      // Fetch templates and trending in parallel
+      const [templatesRes, trendingRes] = await Promise.all([
+        fetch('/api/templates'),
+        fetch('/api/templates/trending?limit=3'),
+      ])
+      
+      const templatesData = await templatesRes.json()
+      const trendingData = await trendingRes.json()
+      
+      if (templatesRes.ok) {
+        setTemplates(templatesData.templates || [])
+      }
+      
+      if (trendingRes.ok) {
+        setTrendingTemplates(trendingData.trending || [])
       }
     } catch (e) {
       console.error('Failed to load templates:', e)
@@ -485,6 +498,23 @@ export default function SelectVMPage() {
     })
     
     setDuplicateTemplate(duplicate || null)
+  }
+
+  // Log share events
+  const logShareEvent = async (templateId: string, shareMethod: 'twitter' | 'linkedin' | 'email' | 'copy_link') => {
+    try {
+      await fetch('/api/templates/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          templateId,
+          eventType: 'share',
+          metadata: { shareMethod },
+        }),
+      })
+    } catch (e) {
+      console.warn('Failed to log share event:', e)
+    }
   }
 
   const handleCreateTemplate = async () => {
@@ -1345,18 +1375,6 @@ export default function SelectVMPage() {
               </p>
             </div>
             <div className="flex items-center gap-3">
-              {templates.length > 5 && (
-                <button
-                  onClick={() => setShowAllTemplates(!showAllTemplates)}
-                  className="flex items-center gap-1 text-sm text-sam-accent hover:text-sam-accent/80 transition-colors"
-                >
-                  {showAllTemplates ? (
-                    <>Show less <ChevronUp className="w-4 h-4" /></>
-                  ) : (
-                    <>Show all {templates.length} <ChevronDown className="w-4 h-4" /></>
-                  )}
-                </button>
-              )}
               <button
                 onClick={handleCreateTemplateClick}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg bg-sam-accent/10 border border-sam-accent/30 text-sam-accent text-sm font-medium hover:bg-sam-accent/20 hover:border-sam-accent/50 transition-all"
@@ -1372,19 +1390,44 @@ export default function SelectVMPage() {
               <Loader2 className="w-6 h-6 animate-spin text-sam-accent" />
             </div>
           ) : templates.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {(showAllTemplates ? templates : templates.slice(0, 5)).map((template, index) => (
+            <>
+            {/* Combined templates: trending first, then others */}
+            {(() => {
+              // Get trending template IDs to avoid duplicates
+              const trendingIds = new Set(trendingTemplates.map(t => t.id))
+              // Non-trending templates
+              const otherTemplates = templates.filter(t => !trendingIds.has(t.id))
+              // Combined list: trending first, then others
+              const allTemplates = [...trendingTemplates, ...otherTemplates]
+              // Paginate
+              const startIndex = templatePage * TEMPLATES_PER_PAGE
+              const paginatedTemplates = allTemplates.slice(startIndex, startIndex + TEMPLATES_PER_PAGE)
+              const totalPages = Math.ceil(allTemplates.length / TEMPLATES_PER_PAGE)
+              
+              return (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {paginatedTemplates.map((template, index) => {
+                      const globalIndex = startIndex + index
+                      const isTrending = globalIndex < trendingTemplates.length
+                      return (
                 <motion.div
                   key={template.id}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.3, delay: 0.05 * (index + 1) }}
-                  className={`group relative p-5 rounded-xl border border-sam-border bg-sam-surface/50 transition-all ${template.comingSoon
+                  className={`group relative p-5 rounded-xl border ${isTrending ? 'border-sam-accent/30 bg-gradient-to-br from-sam-accent/5 to-sam-surface/50' : 'border-sam-border bg-sam-surface/50'} transition-all ${template.comingSoon
                       ? 'opacity-75 cursor-not-allowed'
                       : 'hover:border-sam-accent/50 hover:bg-sam-surface/70 cursor-pointer'
                     }`}
                   onClick={() => !template.comingSoon && handleTemplateClick(template)}
                 >
+                  {/* Trending Badge */}
+                  {isTrending && (
+                    <div className="absolute -top-2 -left-2 px-2 py-0.5 rounded-full bg-sam-accent text-sam-bg text-[10px] font-bold flex items-center gap-1">
+                      🔥 #{globalIndex + 1}
+                    </div>
+                  )}
                   {/* Template Logo and Info */}
                   <div className="flex items-start gap-4 mb-4">
                     <div className="w-12 h-12 rounded-xl bg-sam-bg flex items-center justify-center overflow-hidden flex-shrink-0">
@@ -1495,8 +1538,37 @@ export default function SelectVMPage() {
                     <div className="absolute inset-0 rounded-xl bg-sam-accent/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
                   )}
                 </motion.div>
-              ))}
-            </div>
+              )})}
+                  </div>
+                  
+                  {/* Pagination Controls */}
+                  {totalPages > 1 && (
+                    <div className="flex items-center justify-center gap-4 mt-6">
+                      <button
+                        onClick={() => setTemplatePage(prev => Math.max(0, prev - 1))}
+                        disabled={templatePage === 0}
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg border border-sam-border text-sm font-medium hover:border-sam-accent/50 hover:bg-sam-surface/70 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <ArrowLeft className="w-4 h-4" />
+                        Previous
+                      </button>
+                      <span className="text-sm text-sam-text-dim">
+                        Page {templatePage + 1} of {totalPages}
+                      </span>
+                      <button
+                        onClick={() => setTemplatePage(prev => Math.min(totalPages - 1, prev + 1))}
+                        disabled={templatePage >= totalPages - 1}
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg border border-sam-border text-sm font-medium hover:border-sam-accent/50 hover:bg-sam-surface/70 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Next
+                        <ArrowRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                </>
+              )
+            })()}
+            </>
           ) : (
             <div className="p-8 rounded-xl border border-sam-border bg-sam-surface/30 text-center">
               <Rocket className="w-12 h-12 text-sam-text-dim mx-auto mb-3" />
@@ -3435,6 +3507,7 @@ export default function SelectVMPage() {
                       navigator.clipboard.writeText(url)
                       setCopiedTemplateId(templateToShare.id)
                       setTimeout(() => setCopiedTemplateId(null), 2000)
+                      logShareEvent(templateToShare.id, 'copy_link')
                     }}
                     className="w-full p-4 rounded-xl border border-sam-border hover:border-sam-accent/50 hover:bg-sam-bg/50 transition-all flex items-center gap-4"
                   >
@@ -3458,6 +3531,7 @@ export default function SelectVMPage() {
                     href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(`This ${templateToShare.name} AI agent template is insane.\n\n${templateToShare.description}\n\nCheck it out on ClawdBody.`)}&url=${encodeURIComponent(`${typeof window !== 'undefined' ? window.location.origin : 'https://clawdbody.com'}/templates/${templateToShare.id}`)}`}
                     target="_blank"
                     rel="noopener noreferrer"
+                    onClick={() => logShareEvent(templateToShare.id, 'twitter')}
                     className="w-full p-4 rounded-xl border border-sam-border hover:border-sam-accent/50 hover:bg-sam-bg/50 transition-all flex items-center gap-4"
                   >
                     <div className="w-10 h-10 rounded-lg bg-sam-bg flex items-center justify-center flex-shrink-0">
@@ -3477,6 +3551,7 @@ export default function SelectVMPage() {
                     href={`https://www.linkedin.com/feed/?shareActive=true&text=${encodeURIComponent(`Just found this ${templateToShare.name} AI agent template and had to share.\n${templateToShare.description}\n\nIt's available on ClawdBody.\n\nWhat workflows are you automating with AI agents?`)}&url=${encodeURIComponent(`${typeof window !== 'undefined' ? window.location.origin : 'https://clawdbody.com'}/templates/${templateToShare.id}`)}`}
                     target="_blank"
                     rel="noopener noreferrer"
+                    onClick={() => logShareEvent(templateToShare.id, 'linkedin')}
                     className="w-full p-4 rounded-xl border border-sam-border hover:border-sam-accent/50 hover:bg-sam-bg/50 transition-all flex items-center gap-4"
                   >
                     <div className="w-10 h-10 rounded-lg bg-sam-bg flex items-center justify-center flex-shrink-0">
@@ -3494,6 +3569,7 @@ export default function SelectVMPage() {
                   {/* Share via Email */}
                   <a
                     href={`mailto:?subject=${encodeURIComponent(`${templateToShare.name} — AI agent template I found to automate entire workflow`)}&body=${encodeURIComponent(`Hey,\n\nFound this AI agent template and thought you might find it useful:\n\n${templateToShare.name}\n${templateToShare.description}\n\nIt's available on ClawdBody:\n${typeof window !== 'undefined' ? window.location.origin : 'https://clawdbody.com'}/templates/${templateToShare.id}`)}`}
+                    onClick={() => logShareEvent(templateToShare.id, 'email')}
                     className="w-full p-4 rounded-xl border border-sam-border hover:border-sam-accent/50 hover:bg-sam-bg/50 transition-all flex items-center gap-4"
                   >
                     <div className="w-10 h-10 rounded-lg bg-sam-bg flex items-center justify-center flex-shrink-0">

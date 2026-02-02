@@ -324,6 +324,40 @@ fi
 
     console.log(`[Deploy] VM record created: ${vm.id}`)
 
+    // === Step 7.5: Log deployment event ===
+    try {
+      const isBuiltIn = !!getTemplateById(templateId)
+      
+      // Log the event
+      await prisma.templateEvent.create({
+        data: {
+          templateId,
+          isBuiltIn,
+          userId: session.user.id,
+          userName: session.user.name || null,
+          eventType: 'deploy',
+          metadata: JSON.stringify({
+            vmProvider: 'orgo',
+            ram,
+            vmId: vm.id,
+            agentName,
+          }),
+        },
+      })
+      
+      // Increment deploy count for user-created templates
+      if (!isBuiltIn) {
+        await prisma.marketplaceTemplate.update({
+          where: { templateId },
+          data: { deployCount: { increment: 1 } },
+        })
+      }
+      
+      console.log(`[Deploy] Deployment event logged for ${templateId}`)
+    } catch (error) {
+      console.warn(`[Deploy] Failed to log deployment event (non-fatal):`, error)
+    }
+
     // === Step 8: Build response ===
     const result: DeployResult = {
       success: true,

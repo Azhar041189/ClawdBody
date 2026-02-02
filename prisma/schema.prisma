@@ -239,11 +239,46 @@ model MarketplaceTemplate {
   
   // Stats
   deployCount Int      @default(0)
+  shareCount  Int      @default(0)
   
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   
+  // Relations
+  events      TemplateEvent[]
+  
   @@index([category])
   @@index([authorId])
   @@index([isPublic, isVerified])
+  @@index([deployCount])
+  @@index([shareCount])
+}
+
+// Template Events - Track deployments, shares, and other interactions
+model TemplateEvent {
+  id          String   @id @default(cuid())
+  
+  // Template (can be user-created or built-in)
+  templateId  String              // The template slug (e.g., "moltbook", "personal-assistant-xyz")
+  isBuiltIn   Boolean  @default(false) // True if this is a built-in template
+  
+  // User who performed the action
+  userId      String?             // Null for anonymous actions (shares from non-logged-in users)
+  userName    String?
+  
+  // Event type
+  eventType   String              // "deploy", "share", "view", "click"
+  
+  // Additional metadata (JSON)
+  metadata    String?  @db.Text   // JSON: { shareMethod: "twitter", vmProvider: "orgo", etc }
+  
+  createdAt   DateTime @default(now())
+  
+  // Relations
+  template    MarketplaceTemplate? @relation(fields: [templateId], references: [templateId])
+  
+  @@index([templateId])
+  @@index([userId])
+  @@index([eventType])
+  @@index([createdAt])
 }
