@@ -1509,7 +1509,7 @@ export default function SelectVMPage() {
                 Template Marketplace
               </h2>
               <p className="text-sm text-sam-text-dim mt-1">
-                Deploy AI agents and workflows with one click
+                Hire AI Employees to do your work.
               </p>
             </div>
             <div className="flex items-center gap-3">
