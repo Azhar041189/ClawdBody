@@ -619,7 +619,10 @@ export async function runAWSSetupProcess(
       })
     }
 
-    const user = await prisma.user.findUnique({ where: { id: userId } })
+    const user = await prisma.user.findUnique({ 
+      where: { id: userId },
+      select: { isPro: true },
+    })
     const awsClient = new AWSClient({
       accessKeyId: awsAccessKeyId,
       secretAccessKey: awsSecretAccessKey,
@@ -709,12 +712,15 @@ export async function runAWSSetupProcess(
     )
 
     // Check if using custom AMI (everything pre-installed)
-    const usingCustomAmi = !!process.env.CLAWDBODY_AWS_CUSTOM_AMI_ID
+    // Use custom AMI for all users if available (skip installation)
+    const customAmiAvailable = !!process.env.CLAWDBODY_AWS_CUSTOM_AMI_ID
+    const usingCustomAmi = customAmiAvailable
+    
     let clawdbotResult: { success: boolean; version?: string } | null = null
     
     if (usingCustomAmi) {
       // Custom AMI - skip installation, just verify and configure
-      console.log('[AWS Setup] Using custom AMI - skipping installation steps')
+      console.log(`[AWS Setup] Using custom AMI - skipping installation steps (AMI: ${process.env.CLAWDBODY_AWS_CUSTOM_AMI_ID})`)
       
       // Immediately mark as installed (since it's in the AMI)
       // This updates the UI right away so it doesn't show "Installing Clawdbot"

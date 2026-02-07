@@ -11,11 +11,18 @@ export async function POST(req: NextRequest) {
             return new NextResponse('Unauthorized', { status: 401 })
         }
 
-        const { templateId, agentName } = await req.json()
+        const { templateId, agentName, returnUrl } = await req.json()
 
         // Get the base URL from NEXTAUTH_URL or fallback to request headers
         const baseUrl = process.env.NEXTAUTH_URL || 
                        `${req.headers.get('x-forwarded-proto') || 'http'}://${req.headers.get('host') || 'localhost:3000'}`
+
+        // Determine action and success URL based on context
+        // If returnUrl is provided, it's from upgrade page; otherwise it's from deploy flow
+        const action = returnUrl ? 'upgrade_to_pro' : 'deploy_pro_vm'
+        // Ensure returnUrl starts with / if provided
+        const successPath = returnUrl ? (returnUrl.startsWith('/') ? returnUrl : `/${returnUrl}`) : '/learning-sources'
+        const successUrl = `${baseUrl}${successPath}?session_id={CHECKOUT_SESSION_ID}&pro_signup=true`
 
         // Create Stripe Checkout Session
         const checkoutSession = await stripe.checkout.sessions.create({
@@ -30,11 +37,11 @@ export async function POST(req: NextRequest) {
             customer_email: session.user.email,
             metadata: {
                 userId: session.user.id,
-                action: 'deploy_pro_vm',
+                action: action,
                 templateId: templateId || '',
                 agentName: agentName || '',
             },
-            success_url: `${baseUrl}/learning-sources?session_id={CHECKOUT_SESSION_ID}&pro_signup=true`,
+            success_url: successUrl,
             cancel_url: `${baseUrl}/select-vm`,
             allow_promotion_codes: true,
         })

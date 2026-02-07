@@ -475,14 +475,9 @@ export function SetupWizard() {
                           status={setupStatus?.clawdbotInstalled ? 'complete' : (setupStatus?.vmCreated && currentStep === 'configuring_vm') ? 'running' : 'pending'}
                         />
                         <SetupTaskItem
-                          label="Configuring Telegram"
-                          sublabel="Chat gateway with heartbeat"
-                          status={setupStatus?.telegramConfigured ? 'complete' : (setupStatus?.clawdbotInstalled && currentStep === 'configuring_vm') ? 'running' : 'pending'}
-                        />
-                        <SetupTaskItem
                           label="Starting gateway"
                           sublabel="Clawdbot gateway on port 18789"
-                          status={setupStatus?.gatewayStarted ? 'complete' : (setupStatus?.telegramConfigured && currentStep === 'configuring_vm') ? 'running' : 'pending'}
+                          status={setupStatus?.gatewayStarted ? 'complete' : (setupStatus?.clawdbotInstalled && currentStep === 'configuring_vm') ? 'running' : 'pending'}
                         />
                       </div>
 
@@ -741,7 +736,6 @@ function getTerminalText(step: SetupStep, status: SetupStatus | null): string {
   }
   if (step === 'configuring_vm') {
     if (status?.gatewayStarted) return 'clawdbot gateway run'
-    if (status?.telegramConfigured) return 'nohup /tmp/start-clawdbot.sh &'
     if (status?.clawdbotInstalled) return 'npm install -g clawdbot@latest'
     if (status?.vmCreated) return 'sudo apt-get install -y python3 pip'
     return isAWS 

@@ -230,7 +230,7 @@ function generateContextMessage(connectedSources: Set<string>): string {
 }
 
 function LearningSourcesContent() {
-  const { data: session } = useSession()
+  const { data: session, update: updateSession } = useSession()
   const router = useRouter()
   const searchParams = useSearchParams()
   const [refreshKey, setRefreshKey] = useState(0)
@@ -442,6 +442,8 @@ function LearningSourcesContent() {
           if (res.ok) {
             const data = await res.json()
             addLog('success', 'Pro Workspace deployment initialized')
+            // Refresh the NextAuth session to pick up the new isPro value
+            await updateSession()
             // Refresh VMs to see the new one
             fetchVMs()
           } else {
@@ -1556,8 +1558,6 @@ function SetupProgressView({
   vmId?: string | null
 }) {
   const [isProgressCollapsed, setIsProgressCollapsed] = useState(false)
-  // Determine if Telegram was configured (either completed or in progress)
-  const hasTelegramSetup = setupStatus?.telegramConfigured || setupStatus?.gatewayStarted
 
   const allSteps = [
     {
@@ -1576,25 +1576,14 @@ function SetupProgressView({
       active: () => (setupStatus?.vmCreated && !setupStatus?.clawdbotInstalled && setupStatus?.status !== 'failed') || false
     },
     {
-      id: 'telegram',
-      label: 'Configuring Telegram',
-      icon: MessageCircle,
-      check: () => setupStatus?.telegramConfigured || false,
-      active: () => setupStatus?.clawdbotInstalled && !setupStatus?.telegramConfigured && !setupStatus?.gatewayStarted && setupStatus?.status !== 'failed' && setupStatus?.status !== 'ready',
-      optional: true,
-      // Only show if Telegram was actually configured or is being configured
-      // Don't show if setup is 'ready' without Telegram (means it wasn't configured)
-      show: () => hasTelegramSetup || (setupStatus?.clawdbotInstalled && !setupStatus?.telegramConfigured && setupStatus?.status !== 'ready')
-    },
-    {
       id: 'gateway',
       label: 'Starting Gateway',
       icon: Terminal,
       check: () => setupStatus?.gatewayStarted || false,
-      active: () => setupStatus?.clawdbotInstalled && setupStatus?.telegramConfigured && !setupStatus?.gatewayStarted && setupStatus?.status !== 'failed' && setupStatus?.status !== 'ready',
+      active: () => setupStatus?.clawdbotInstalled && !setupStatus?.gatewayStarted && setupStatus?.status !== 'failed' && setupStatus?.status !== 'ready',
       optional: true,
-      // Only show if gateway was started or Telegram was configured
-      show: () => hasTelegramSetup || (setupStatus?.telegramConfigured && setupStatus?.status !== 'ready')
+      // Only show if gateway was started
+      show: () => setupStatus?.gatewayStarted || (setupStatus?.clawdbotInstalled && setupStatus?.status !== 'ready')
     },
     {
       id: 'complete',

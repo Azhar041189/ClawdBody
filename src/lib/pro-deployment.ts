@@ -47,10 +47,11 @@ export async function deployProVM({ userId, name, templateId, agentName }: Deplo
                 // Store encrypted system credentials (same format as user credentials)
                 awsAccessKeyId: encrypt(AWS_CONFIG.accessKeyId),
                 awsSecretAccessKey: encrypt(AWS_CONFIG.secretAccessKey),
-                // Store encrypted LLM API key
+                // Store encrypted LLM API key - mark as managed
                 llmApiKey: encrypt(LLM_API_KEY),
                 llmProvider: LLM_PROVIDER,
                 llmModel: LLM_MODEL,
+                isManagedLlmApiKey: true, // Mark as managed key
             },
             update: {
                 status: 'provisioning',
@@ -64,6 +65,7 @@ export async function deployProVM({ userId, name, templateId, agentName }: Deplo
                 llmApiKey: encrypt(LLM_API_KEY),
                 llmProvider: LLM_PROVIDER,
                 llmModel: LLM_MODEL,
+                isManagedLlmApiKey: true, // Mark as managed key
             },
         })
 

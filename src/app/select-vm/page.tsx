@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useSession, signOut } from 'next-auth/react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Loader2, ArrowRight, CheckCircle2, LogOut, X, Key, FolderPlus, AlertCircle, ExternalLink, Globe, Server, Plus, Trash2, Play, Power, ArrowLeft, ExternalLinkIcon, Settings, Rocket, ChevronDown, ChevronUp, ChevronRight, Sparkles, PenTool, User, Lightbulb, Share2, Link2, Check } from 'lucide-react'
@@ -222,9 +222,10 @@ const vmOptions: VMOption[] = [
   },
 ]
 
-export default function SelectVMPage() {
-  const { data: session, status } = useSession()
+function SelectVMContent() {
+  const { data: session, status, update: updateSession } = useSession()
   const router = useRouter()
+  const searchParams = useSearchParams()
 
   // VM list state
   const [userVMs, setUserVMs] = useState<UserVM[]>([])
@@ -232,6 +233,38 @@ export default function SelectVMPage() {
   const [isLoadingVMs, setIsLoadingVMs] = useState(true)
   const [deletingVMId, setDeletingVMId] = useState<string | null>(null)
   const [isDeployingPro, setIsDeployingPro] = useState(false)
+
+  // Verify Stripe session on return from checkout (upgrade flow)
+  useEffect(() => {
+    const sessionId = searchParams?.get('session_id')
+    const proSignup = searchParams?.get('pro_signup')
+
+    if (sessionId && proSignup === 'true') {
+      const verifySession = async () => {
+        try {
+          const response = await fetch('/api/stripe/verify-session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: sessionId }),
+          })
+
+          if (response.ok) {
+            const data = await response.json()
+            if (data.isPro) {
+              // Refresh the NextAuth session to pick up the new isPro value
+              await updateSession()
+              // Clean up the URL params
+              router.replace('/select-vm')
+            }
+          }
+        } catch (error) {
+          console.error('Error verifying Stripe session:', error)
+        }
+      }
+
+      verifySession()
+    }
+  }, [searchParams, updateSession, router])
 
   // General state
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -326,6 +359,7 @@ export default function SelectVMPage() {
   const [awsVMName, setAwsVMName] = useState('')
   const [isEditingAwsCredentials, setIsEditingAwsCredentials] = useState(false)
   const [isDeletingAwsCredentials, setIsDeletingAwsCredentials] = useState(false)
+  const [isDeployingAWSDirectly, setIsDeployingAWSDirectly] = useState(false)
 
   // E2B configuration modal state
   const [showE2BModal, setShowE2BModal] = useState(false)
@@ -864,6 +898,55 @@ export default function SelectVMPage() {
     return null
   }
 
+  // Helper function to directly deploy AWS VM for pro users
+  const deployAWSDirectly = async (vmName: string) => {
+    setIsDeployingAWSDirectly(true)
+    setIsSubmitting(true)
+    setError(null)
+    setAwsError(null)
+
+    try {
+      // Use stored credentials and configuration
+      // Note: Instance type is stored in DB but not in credentials object, so use default
+      const region = credentials?.awsRegion || 'us-east-1'
+      const instanceType = 'm7i-flex.large' // Default instance type
+
+      // Create and provision the VM immediately
+      const res = await fetch('/api/vms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: vmName.trim(),
+          provider: 'aws',
+          provisionNow: true, // Provision the EC2 instance immediately
+          awsInstanceType: instanceType,
+          awsRegion: region,
+          useStoredApiKey: true,  // Use stored LLM API key
+        }),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to provision EC2 instance')
+      }
+
+      // Redirect to learning-sources page to view provisioning progress
+      router.push(`/learning-sources?vmId=${data.vm.id}`)
+    } catch (e) {
+      // If deployment fails, show error and fall back to modal
+      const errorMessage = e instanceof Error ? e.message : 'Failed to provision EC2 instance'
+      setAwsError(errorMessage)
+      setIsSubmitting(false)
+      setIsDeployingAWSDirectly(false)
+      // Show modal so user can see the error and potentially fix it
+      setShowAWSModal(true)
+      setAwsKeyValidated(true)
+      setAwsRegion(credentials?.awsRegion || 'us-east-1')
+      await fetchAWSData()
+    }
+  }
+
   const handleProviderClick = async (provider: VMProvider) => {
     if (!vmOptions.find(opt => opt.id === provider)?.available) {
       return
@@ -883,9 +966,18 @@ export default function SelectVMPage() {
         setShowOrgoModal(true)
       }
     } else if (provider === 'aws') {
-      setAwsVMName(`AWS VM ${userVMs.filter(vm => vm.provider === 'aws').length + 1}`)
+      const vmName = `AWS VM ${userVMs.filter(vm => vm.provider === 'aws').length + 1}`
+      setAwsVMName(vmName)
       setAwsError(null)
 
+      // For pro users with stored AWS credentials, deploy directly without showing dialog
+      const isPro = (session?.user as any)?.isPro
+      if (isPro && credentials?.hasAwsCredentials) {
+        await deployAWSDirectly(vmName)
+        return
+      }
+
+      // For free users or pro users without stored credentials, show the dialog
       // If we already have AWS credentials stored, skip to configuration
       if (credentials?.hasAwsCredentials) {
         setShowAWSModal(true)
@@ -2156,6 +2248,7 @@ export default function SelectVMPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                   {vmOptions.map((option, index) => {
                     const isDisabled = !option.available || isSubmitting
+                    const isAWSDeploying = option.id === 'aws' && isDeployingAWSDirectly
 
                     return (
                       <motion.button
@@ -2164,16 +2257,27 @@ export default function SelectVMPage() {
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.5, delay: 0.1 * index }}
                         onClick={() => handleProviderClick(option.id)}
-                        disabled={isDisabled}
-                        className={`relative p-5 rounded-xl border transition-all duration-300 text-left ${isDisabled
+                        disabled={isDisabled || isAWSDeploying}
+                        className={`relative p-5 rounded-xl border transition-all duration-300 text-left overflow-hidden ${isDisabled || isAWSDeploying
                           ? 'border-sam-border bg-sam-surface/30 opacity-60 cursor-not-allowed'
                           : 'border-sam-border bg-sam-surface/30 hover:border-sam-accent/50 hover:bg-sam-surface/40 cursor-pointer'
                           }`}
                       >
-                        {/* Icon */}
-                        <div className="flex items-center justify-center mb-4 h-14">
-                          {option.icon}
-                        </div>
+                        {/* Loading overlay for AWS direct deployment */}
+                        {isAWSDeploying && (
+                          <div className="absolute inset-0 flex items-center justify-center z-20 bg-sam-surface/90 backdrop-blur-sm rounded-xl">
+                            <div className="flex flex-col items-center gap-2">
+                              <Loader2 className="w-8 h-8 animate-spin text-sam-accent" />
+                              <span className="text-sm text-sam-text font-medium">Deploying...</span>
+                            </div>
+                          </div>
+                        )}
+                        {/* Card content wrapper - blurred when deploying */}
+                        <div className={`relative z-10 ${isAWSDeploying ? 'blur-sm pointer-events-none' : ''}`}>
+                          {/* Icon */}
+                          <div className="flex items-center justify-center mb-4 h-14">
+                            {option.icon}
+                          </div>
 
                         {/* Name and Badge */}
                         <div className="flex items-center justify-between mb-2">
@@ -2215,12 +2319,13 @@ export default function SelectVMPage() {
                           (option.id === 'aws' && credentials?.hasAwsCredentials) ||
                           (option.id === 'e2b' && credentials?.hasE2bApiKey)
                         ) && (
-                            <div className="absolute top-3 right-3">
+                            <div className="absolute top-3 right-3 z-10">
                               <span className="text-[10px] font-mono text-sam-accent bg-sam-accent/10 px-1.5 py-0.5 rounded">
                                 Quick Add
                               </span>
                             </div>
                           )}
+                        </div>
                       </motion.button>
                     )
                   })}
@@ -4637,5 +4742,20 @@ export default function SelectVMPage() {
         )}
       </AnimatePresence>
     </div>
+  )
+}
+
+export default function SelectVMPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-sam-bg flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-2 border-sam-accent border-t-transparent rounded-full animate-spin" />
+          <p className="text-sam-text-dim font-mono text-sm">Loading...</p>
+        </div>
+      </div>
+    }>
+      <SelectVMContent />
+    </Suspense>
   )
 }

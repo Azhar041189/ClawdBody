@@ -79,6 +79,7 @@ model SetupState {
   llmApiKey    String?  // Any provider's API key (Anthropic, OpenRouter, OpenAI, etc.)
   llmProvider  String?  // Auto-detected: anthropic, openrouter, openai, google, groq, xai, perplexity, fireworks, cohere
   llmModel     String?  // Model ID: e.g., "claude-sonnet-4", "gpt-4o", "openai/gpt-oss-120b:free"
+  isManagedLlmApiKey Boolean @default(false) // True if this is a managed key provided by ClawdBody (Pro users)
   
   // VM Provider API Keys (encrypted)
   orgoApiKey   String?

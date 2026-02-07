@@ -56,7 +56,9 @@ export default function UpgradePage() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({}),
+        body: JSON.stringify({
+          returnUrl: '/select-vm',
+        }),
       })
 
       if (!response.ok) {
