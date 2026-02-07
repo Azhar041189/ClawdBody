@@ -71,6 +71,25 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    // Check if user is Pro and has a managed key - block modification
+    const user = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { isPro: true },
+    })
+
+    const existingSetupState = await prisma.setupState.findUnique({
+      where: { userId: session.user.id },
+      select: { isManagedLlmApiKey: true },
+    })
+
+    // Block Pro users from modifying managed keys
+    if (user?.isPro && existingSetupState?.isManagedLlmApiKey) {
+      return NextResponse.json({ 
+        error: 'Cannot modify managed API key. This key is provided by ClawdBody as part of your Pro subscription.',
+        isManaged: true,
+      }, { status: 403 })
+    }
+
     const body = await request.json()
     const apiKey = body.claudeApiKey || body.apiKey
 
@@ -102,12 +121,14 @@ export async function PUT(request: NextRequest) {
         llmApiKey: encryptedKey,
         llmProvider: provider,
         llmModel: defaultModel,
+        isManagedLlmApiKey: false, // User-provided keys are not managed
       },
       create: {
         userId: session.user.id,
         llmApiKey: encryptedKey,
         llmProvider: provider,
         llmModel: defaultModel,
+        isManagedLlmApiKey: false, // User-provided keys are not managed
         status: 'pending',
       },
     })
@@ -144,12 +165,27 @@ export async function DELETE() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    // Check if user is Pro and has a managed key - block deletion
+    const user = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { isPro: true },
+    })
+
     const setupState = await prisma.setupState.findUnique({
       where: { userId: session.user.id },
+      select: { isManagedLlmApiKey: true },
     })
 
     if (!setupState) {
       return NextResponse.json({ success: true }) // Nothing to delete
+    }
+
+    // Block Pro users from deleting managed keys
+    if (user?.isPro && setupState.isManagedLlmApiKey) {
+      return NextResponse.json({ 
+        error: 'Cannot delete managed API key. This key is provided by ClawdBody as part of your Pro subscription.',
+        isManaged: true,
+      }, { status: 403 })
     }
 
     await prisma.setupState.update({
@@ -158,6 +194,7 @@ export async function DELETE() {
         llmApiKey: null,
         llmProvider: null,
         llmModel: null,
+        isManagedLlmApiKey: false, // Reset managed flag when deleting
       },
     })
 

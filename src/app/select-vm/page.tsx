@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useSession, signOut } from 'next-auth/react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Loader2, ArrowRight, CheckCircle2, LogOut, X, Key, FolderPlus, AlertCircle, ExternalLink, Globe, Server, Plus, Trash2, Play, Power, ArrowLeft, ExternalLinkIcon, Settings, Rocket, ChevronDown, ChevronUp, Sparkles, PenTool, User, Lightbulb, Share2, Link2, Check } from 'lucide-react'
+import { Loader2, ArrowRight, CheckCircle2, LogOut, X, Key, FolderPlus, AlertCircle, ExternalLink, Globe, Server, Plus, Trash2, Play, Power, ArrowLeft, ExternalLinkIcon, Settings, Rocket, ChevronDown, ChevronUp, ChevronRight, Sparkles, PenTool, User, Lightbulb, Share2, Link2, Check } from 'lucide-react'
 import type { Template, TemplateIdea } from '@/lib/templates'
 import { TEMPLATE_IDEAS, isEmojiLogo } from '@/lib/templates'
 
@@ -142,20 +143,20 @@ const getOrgoCPUForRAM = (ram: number): number => {
 
 const vmOptions: VMOption[] = [
   {
-    id: 'orgo',
-    name: 'Orgo',
-    description: 'Fast, reliable virtual machines optimized for AI workloads with GUI.',
-    icon: <img src="/logos/orgo.png" alt="Orgo" className="w-12 h-12 object-contain" />,
-    available: true,
-    url: 'https://orgo.ai',
-  },
-  {
     id: 'aws',
     name: 'AWS EC2',
     description: 'Enterprise-grade cloud infrastructure. Pay-as-you-go pricing.',
     icon: <img src="/logos/aws.png" alt="AWS" className="w-12 h-12 object-contain" />,
     available: true,
     url: 'https://aws.amazon.com',
+  },
+  {
+    id: 'orgo',
+    name: 'Orgo',
+    description: 'Fast, reliable virtual machines optimized for AI workloads with GUI.',
+    icon: <img src="/logos/orgo.png" alt="Orgo" className="w-12 h-12 object-contain" />,
+    available: true,
+    url: 'https://orgo.ai',
   },
   {
     id: 'e2b',
@@ -221,19 +222,54 @@ const vmOptions: VMOption[] = [
   },
 ]
 
-export default function SelectVMPage() {
-  const { data: session, status } = useSession()
+function SelectVMContent() {
+  const { data: session, status, update: updateSession } = useSession()
   const router = useRouter()
+  const searchParams = useSearchParams()
 
   // VM list state
   const [userVMs, setUserVMs] = useState<UserVM[]>([])
   const [credentials, setCredentials] = useState<Credentials | null>(null)
   const [isLoadingVMs, setIsLoadingVMs] = useState(true)
   const [deletingVMId, setDeletingVMId] = useState<string | null>(null)
+  const [isDeployingPro, setIsDeployingPro] = useState(false)
+
+  // Verify Stripe session on return from checkout (upgrade flow)
+  useEffect(() => {
+    const sessionId = searchParams?.get('session_id')
+    const proSignup = searchParams?.get('pro_signup')
+
+    if (sessionId && proSignup === 'true') {
+      const verifySession = async () => {
+        try {
+          const response = await fetch('/api/stripe/verify-session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: sessionId }),
+          })
+
+          if (response.ok) {
+            const data = await response.json()
+            if (data.isPro) {
+              // Refresh the NextAuth session to pick up the new isPro value
+              await updateSession()
+              // Clean up the URL params
+              router.replace('/select-vm')
+            }
+          }
+        } catch (error) {
+          console.error('Error verifying Stripe session:', error)
+        }
+      }
+
+      verifySession()
+    }
+  }, [searchParams, updateSession, router])
 
   // General state
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [isAddVMCollapsed, setIsAddVMCollapsed] = useState(true) // Collapsed by default
 
   // LLM API key state (unified across all providers)
   const [llmApiKey, setLlmApiKey] = useState('')
@@ -323,6 +359,7 @@ export default function SelectVMPage() {
   const [awsVMName, setAwsVMName] = useState('')
   const [isEditingAwsCredentials, setIsEditingAwsCredentials] = useState(false)
   const [isDeletingAwsCredentials, setIsDeletingAwsCredentials] = useState(false)
+  const [isDeployingAWSDirectly, setIsDeployingAWSDirectly] = useState(false)
 
   // E2B configuration modal state
   const [showE2BModal, setShowE2BModal] = useState(false)
@@ -341,7 +378,7 @@ export default function SelectVMPage() {
   const [trendingTemplates, setTrendingTemplates] = useState<(Template & { stats?: { deployCount: number; shareCount: number; recentActivity: number } })[]>([])
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(true)
   const [templatePage, setTemplatePage] = useState(0)
-  const TEMPLATES_PER_PAGE = 6
+  const TEMPLATES_PER_PAGE = 9
   const [showTemplateDeployModal, setShowTemplateDeployModal] = useState(false)
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
   const [templateAgentName, setTemplateAgentName] = useState('')
@@ -861,6 +898,55 @@ export default function SelectVMPage() {
     return null
   }
 
+  // Helper function to directly deploy AWS VM for pro users
+  const deployAWSDirectly = async (vmName: string) => {
+    setIsDeployingAWSDirectly(true)
+    setIsSubmitting(true)
+    setError(null)
+    setAwsError(null)
+
+    try {
+      // Use stored credentials and configuration
+      // Note: Instance type is stored in DB but not in credentials object, so use default
+      const region = credentials?.awsRegion || 'us-east-1'
+      const instanceType = 'm7i-flex.large' // Default instance type
+
+      // Create and provision the VM immediately
+      const res = await fetch('/api/vms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: vmName.trim(),
+          provider: 'aws',
+          provisionNow: true, // Provision the EC2 instance immediately
+          awsInstanceType: instanceType,
+          awsRegion: region,
+          useStoredApiKey: true,  // Use stored LLM API key
+        }),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to provision EC2 instance')
+      }
+
+      // Redirect to learning-sources page to view provisioning progress
+      router.push(`/learning-sources?vmId=${data.vm.id}`)
+    } catch (e) {
+      // If deployment fails, show error and fall back to modal
+      const errorMessage = e instanceof Error ? e.message : 'Failed to provision EC2 instance'
+      setAwsError(errorMessage)
+      setIsSubmitting(false)
+      setIsDeployingAWSDirectly(false)
+      // Show modal so user can see the error and potentially fix it
+      setShowAWSModal(true)
+      setAwsKeyValidated(true)
+      setAwsRegion(credentials?.awsRegion || 'us-east-1')
+      await fetchAWSData()
+    }
+  }
+
   const handleProviderClick = async (provider: VMProvider) => {
     if (!vmOptions.find(opt => opt.id === provider)?.available) {
       return
@@ -880,9 +966,18 @@ export default function SelectVMPage() {
         setShowOrgoModal(true)
       }
     } else if (provider === 'aws') {
-      setAwsVMName(`AWS VM ${userVMs.filter(vm => vm.provider === 'aws').length + 1}`)
+      const vmName = `AWS VM ${userVMs.filter(vm => vm.provider === 'aws').length + 1}`
+      setAwsVMName(vmName)
       setAwsError(null)
 
+      // For pro users with stored AWS credentials, deploy directly without showing dialog
+      const isPro = (session?.user as any)?.isPro
+      if (isPro && credentials?.hasAwsCredentials) {
+        await deployAWSDirectly(vmName)
+        return
+      }
+
+      // For free users or pro users without stored credentials, show the dialog
       // If we already have AWS credentials stored, skip to configuration
       if (credentials?.hasAwsCredentials) {
         setShowAWSModal(true)
@@ -1591,9 +1686,20 @@ export default function SelectVMPage() {
               className="h-16 md:h-20 object-contain"
             />
             {session?.user?.name && (
-              <span className="text-xl md:text-2xl font-medium text-sam-text">
-                Hi {session.user.name.split(' ')[0]}!
-              </span>
+              <div className="flex items-center gap-3">
+                <span className="text-xl md:text-2xl font-medium text-sam-text">
+                  Hi {session.user.name.split(' ')[0]}!
+                </span>
+                {(session.user as any).isPro ? (
+                  <Link href="/pro" className="bg-zinc-800 text-zinc-400 text-xs font-medium px-2 py-0.5 rounded border border-zinc-700 hover:border-zinc-600 hover:text-zinc-300 transition-colors cursor-pointer">
+                    Pro
+                  </Link>
+                ) : (
+                  <Link href="/upgrade" className="bg-zinc-800 text-zinc-400 text-xs font-medium px-2 py-0.5 rounded border border-zinc-700 hover:border-zinc-600 hover:text-zinc-300 transition-colors cursor-pointer">
+                    Free
+                  </Link>
+                )}
+              </div>
             )}
           </motion.div>
           <motion.button
@@ -1616,10 +1722,10 @@ export default function SelectVMPage() {
           className="mb-8 text-center"
         >
           <h1 className="text-4xl md:text-5xl font-display font-bold mb-4 text-sam-text leading-tight">
-            Your Virtual Machines
+            Your OpenClaws 🦞
           </h1>
           <p className="text-lg text-sam-text-dim max-w-2xl mx-auto font-body leading-relaxed">
-            Manage your AI agent VMs. You can run multiple VMs from different providers simultaneously.
+            Your AI workflow deployments
           </p>
         </motion.div>
 
@@ -1643,21 +1749,169 @@ export default function SelectVMPage() {
           <div className="flex items-center justify-center py-12">
             <Loader2 className="w-8 h-8 animate-spin text-sam-accent" />
           </div>
-        ) : userVMs.length > 0 && (
+        ) : userVMs.length === 0 ? (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.1 }}
             className="mb-8"
           >
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-display font-semibold text-sam-text flex items-center gap-2">
-                <Server className="w-5 h-5 text-sam-accent" />
-                Active VMs ({userVMs.length})
-              </h2>
+            {/* Empty State - 1-Click Deploy Card */}
+            <div className="p-8 rounded-2xl border-2 border-dashed border-sam-border bg-sam-surface/30 text-center">
+              <Server className="w-12 h-12 text-sam-text-dim mx-auto mb-4" />
+              <button
+                onClick={async () => {
+                  if (isDeployingPro) return // Prevent double clicks
+                  
+                  setIsDeployingPro(true)
+                  try {
+                    // If user is already Pro, deploy directly
+                    if (session?.user?.isPro) {
+                      const res = await fetch('/api/vms/deploy-pro', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          templateId: 'base',
+                          agentName: 'Pro Agent',
+                        }),
+                      })
+                      if (!res.ok) {
+                        const error = await res.text()
+                        throw new Error(error || 'Failed to deploy VM')
+                      }
+                      const data = await res.json()
+                      const vm = data.vm || data // Handle both { vm } and direct vm response
+                      if (!vm?.id) {
+                        throw new Error('Invalid VM response from server')
+                      }
+                      // Redirect to learning-sources to see deployment progress
+                      // Use vm_deploying param (not pro_signup) to avoid triggering another deploy-pro call
+                      router.push(`/learning-sources?vm_deploying=true&vmId=${vm.id}`)
+                    } else {
+                      // Not Pro, go to Stripe checkout
+                      const res = await fetch('/api/stripe/checkout', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          templateId: 'base',
+                          agentName: 'Pro Agent',
+                        }),
+                      })
+                      if (!res.ok) throw new Error('Failed to start checkout')
+                      const { url } = await res.json()
+                      if (url) window.location.href = url
+                    }
+                  } catch (e) {
+                    setIsDeployingPro(false)
+                    alert(e instanceof Error ? e.message : 'Failed to initiate deployment. Please try again.')
+                  }
+                }}
+                disabled={isDeployingPro}
+                className="px-6 py-3 rounded-lg bg-sam-accent text-sam-bg font-medium hover:bg-sam-accent/90 transition-colors flex items-center gap-2 mx-auto disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isDeployingPro ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Deploying...
+                  </>
+                ) : (
+                  <>
+                    <Rocket className="w-4 h-4" />
+                    Deploy with 1-Click
+                  </>
+                )}
+              </button>
+              <button className="mt-3 text-sm text-sam-text-dim/60 hover:text-sam-text-dim transition-colors flex flex-col items-center gap-1 text-center mx-auto">
+                <span>or bring your own API keys</span>
+                <span className="flex items-center justify-center gap-1.5 text-xs">
+                  <span>free</span>
+                  <span className="text-sam-text-dim/50">•</span>
+                  <span>~20 mins</span>
+                </span>
+              </button>
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.1 }}
+            className="mb-8"
+          >
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-xl font-display font-semibold text-sam-text flex items-center gap-2">
+                  <Server className="w-5 h-5 text-sam-accent" />
+                  Active VMs ({userVMs.length})
+                </h2>
+                <div className="flex flex-col items-end gap-1">
+                  <button
+                    onClick={async () => {
+                      if (isDeployingPro) return // Prevent double clicks
+                      
+                      setIsDeployingPro(true)
+                      try {
+                        // If user is already Pro, deploy directly
+                        if (session?.user?.isPro) {
+                          const res = await fetch('/api/vms/deploy-pro', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              templateId: 'base',
+                              agentName: 'Pro Agent',
+                            }),
+                          })
+                          if (!res.ok) {
+                            const error = await res.text()
+                            throw new Error(error || 'Failed to deploy VM')
+                          }
+                          const data = await res.json()
+                          const vm = data.vm || data // Handle both { vm } and direct vm response
+                          if (!vm?.id) {
+                            throw new Error('Invalid VM response from server')
+                          }
+                          // Redirect to learning-sources to see deployment progress
+                          // Use vm_deploying param (not pro_signup) to avoid triggering another deploy-pro call
+                          router.push(`/learning-sources?vm_deploying=true&vmId=${vm.id}`)
+                        } else {
+                          // Not Pro, go to Stripe checkout
+                          const res = await fetch('/api/stripe/checkout', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              templateId: 'base',
+                              agentName: 'Pro Agent',
+                            }),
+                          })
+                          if (!res.ok) throw new Error('Failed to start checkout')
+                          const { url } = await res.json()
+                          if (url) window.location.href = url
+                        }
+                      } catch (e) {
+                        setIsDeployingPro(false)
+                        alert(e instanceof Error ? e.message : 'Failed to initiate deployment. Please try again.')
+                      }
+                    }}
+                    disabled={isDeployingPro}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-sam-accent/10 border border-sam-accent/30 text-sam-accent text-sm font-medium hover:bg-sam-accent/20 hover:border-sam-accent/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isDeployingPro ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Deploying...
+                      </>
+                    ) : (
+                      <>
+                        <Rocket className="w-4 h-4" />
+                        Deploy 1-Click
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {userVMs.map((vm, index) => (
                 <motion.div
                   key={vm.id}
@@ -1962,122 +2216,162 @@ export default function SelectVMPage() {
           transition={{ duration: 0.6, delay: 0.2 }}
           className="mb-8"
         >
-          <h2 className="text-xl font-display font-semibold text-sam-text mb-4 flex items-center gap-2">
-            <Plus className="w-5 h-5 text-sam-accent" />
-            Add a New VM
-          </h2>
+          <button
+            onClick={() => setIsAddVMCollapsed(!isAddVMCollapsed)}
+            className="w-full text-left mb-4 flex items-start justify-between gap-2 hover:opacity-80 transition-opacity"
+          >
+            <div>
+              <h2 className="text-xl font-display font-semibold text-sam-text flex items-center gap-2">
+                <Plus className="w-5 h-5 text-sam-accent" />
+                Add a New VM
+              </h2>
+              <p className="text-sm text-sam-text-dim mt-1">
+                Click to expand
+              </p>
+            </div>
+            {isAddVMCollapsed ? (
+              <ChevronRight className="w-5 h-5 text-sam-text-dim mt-1" />
+            ) : (
+              <ChevronDown className="w-5 h-5 text-sam-text-dim mt-1" />
+            )}
+          </button>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {vmOptions.map((option, index) => {
-              const isDisabled = !option.available || isSubmitting
+          <AnimatePresence initial={false}>
+            {!isAddVMCollapsed && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.3 }}
+                className="overflow-hidden"
+              >
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {vmOptions.map((option, index) => {
+                    const isDisabled = !option.available || isSubmitting
+                    const isAWSDeploying = option.id === 'aws' && isDeployingAWSDirectly
 
-              return (
-                <motion.button
-                  key={option.id}
+                    return (
+                      <motion.button
+                        key={option.id}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.5, delay: 0.1 * index }}
+                        onClick={() => handleProviderClick(option.id)}
+                        disabled={isDisabled || isAWSDeploying}
+                        className={`relative p-5 rounded-xl border transition-all duration-300 text-left overflow-hidden ${isDisabled || isAWSDeploying
+                          ? 'border-sam-border bg-sam-surface/30 opacity-60 cursor-not-allowed'
+                          : 'border-sam-border bg-sam-surface/30 hover:border-sam-accent/50 hover:bg-sam-surface/40 cursor-pointer'
+                          }`}
+                      >
+                        {/* Loading overlay for AWS direct deployment */}
+                        {isAWSDeploying && (
+                          <div className="absolute inset-0 flex items-center justify-center z-20 bg-sam-surface/90 backdrop-blur-sm rounded-xl">
+                            <div className="flex flex-col items-center gap-2">
+                              <Loader2 className="w-8 h-8 animate-spin text-sam-accent" />
+                              <span className="text-sm text-sam-text font-medium">Deploying...</span>
+                            </div>
+                          </div>
+                        )}
+                        {/* Card content wrapper - blurred when deploying */}
+                        <div className={`relative z-10 ${isAWSDeploying ? 'blur-sm pointer-events-none' : ''}`}>
+                          {/* Icon */}
+                          <div className="flex items-center justify-center mb-4 h-14">
+                            {option.icon}
+                          </div>
+
+                        {/* Name and Badge */}
+                        <div className="flex items-center justify-between mb-2">
+                          <h3 className="text-lg font-display font-semibold text-sam-text">
+                            {option.name}
+                          </h3>
+                        </div>
+                        {option.comingSoon && (
+                          <span className="inline-block text-xs font-mono text-sam-text-dim bg-sam-surface px-2 py-0.5 rounded mb-2">
+                            Coming Soon
+                          </span>
+                        )}
+                        {option.available && (
+                          <span className="inline-block text-xs font-mono text-green-400 bg-green-400/10 px-2 py-0.5 rounded mb-2">
+                            Available
+                          </span>
+                        )}
+
+                        {/* Description */}
+                        <p className="text-sm text-sam-text-dim font-body leading-relaxed mb-3">
+                          {option.description}
+                        </p>
+
+                        {/* Learn More Link */}
+                        <a
+                          href={option.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="inline-flex items-center gap-1 text-sm text-sam-accent hover:text-sam-accent/80 transition-colors font-mono"
+                        >
+                          Learn more
+                          <ArrowRight className="w-3 h-3" />
+                        </a>
+
+                        {/* Quick add indicator for configured providers */}
+                        {option.available && (
+                          (option.id === 'orgo' && credentials?.hasOrgoApiKey) ||
+                          (option.id === 'aws' && credentials?.hasAwsCredentials) ||
+                          (option.id === 'e2b' && credentials?.hasE2bApiKey)
+                        ) && (
+                            <div className="absolute top-3 right-3 z-10">
+                              <span className="text-[10px] font-mono text-sam-accent bg-sam-accent/10 px-1.5 py-0.5 rounded">
+                                Quick Add
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </motion.button>
+                    )
+                  })}
+                </div>
+
+                {/* Custom Provider Card - Full Width */}
+                <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5, delay: 0.1 * index }}
-                  onClick={() => handleProviderClick(option.id)}
-                  disabled={isDisabled}
-                  className={`relative p-5 rounded-xl border transition-all duration-300 text-left ${isDisabled
-                    ? 'border-sam-border bg-sam-surface/30 opacity-60 cursor-not-allowed'
-                    : 'border-sam-border bg-sam-surface/30 hover:border-sam-accent/50 hover:bg-sam-surface/40 cursor-pointer'
-                    }`}
+                  transition={{ duration: 0.5, delay: 0.5 }}
+                  className="relative mt-6 p-6 rounded-xl border-2 bg-gradient-to-br from-sam-surface/40 to-sam-surface/20 hover:from-sam-surface/50 hover:to-sam-surface/30 transition-all duration-300"
+                  style={{
+                    borderImage: 'linear-gradient(135deg, rgba(244, 114, 182, 0.3), rgba(139, 92, 246, 0.3), rgba(59, 130, 246, 0.3)) 1',
+                  }}
                 >
-                  {/* Icon */}
-                  <div className="flex items-center justify-center mb-4 h-14">
-                    {option.icon}
-                  </div>
+                  {/* Gradient border effect */}
+                  <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-pink-500/20 via-purple-500/20 to-blue-500/20 opacity-50 blur-sm -z-10" />
 
-                  {/* Name and Badge */}
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-lg font-display font-semibold text-sam-text">
-                      {option.name}
-                    </h3>
-                  </div>
-                  {option.comingSoon && (
-                    <span className="inline-block text-xs font-mono text-sam-text-dim bg-sam-surface px-2 py-0.5 rounded mb-2">
-                      Coming Soon
-                    </span>
-                  )}
-                  {option.available && (
-                    <span className="inline-block text-xs font-mono text-green-400 bg-green-400/10 px-2 py-0.5 rounded mb-2">
-                      Available
-                    </span>
-                  )}
-
-                  {/* Description */}
-                  <p className="text-sm text-sam-text-dim font-body leading-relaxed mb-3">
-                    {option.description}
-                  </p>
-
-                  {/* Learn More Link */}
-                  <a
-                    href={option.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={(e) => e.stopPropagation()}
-                    className="inline-flex items-center gap-1 text-sm text-sam-accent hover:text-sam-accent/80 transition-colors font-mono"
-                  >
-                    Learn more
-                    <ArrowRight className="w-3 h-3" />
-                  </a>
-
-                  {/* Quick add indicator for configured providers */}
-                  {option.available && (
-                    (option.id === 'orgo' && credentials?.hasOrgoApiKey) ||
-                    (option.id === 'aws' && credentials?.hasAwsCredentials) ||
-                    (option.id === 'e2b' && credentials?.hasE2bApiKey)
-                  ) && (
-                      <div className="absolute top-3 right-3">
-                        <span className="text-[10px] font-mono text-sam-accent bg-sam-accent/10 px-1.5 py-0.5 rounded">
-                          Quick Add
-                        </span>
+                  <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+                    <div className="flex-1 text-center md:text-left">
+                      <div className="flex items-center justify-center md:justify-start gap-2 mb-2">
+                        <Plus className="w-5 h-5 text-sam-accent" />
+                        <h3 className="text-xl font-display font-semibold text-sam-text">
+                          Add Your Own VM Provider
+                        </h3>
                       </div>
-                    )}
-                </motion.button>
-              )
-            })}
-          </div>
-
-          {/* Custom Provider Card - Full Width */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.5 }}
-            className="relative mt-6 p-6 rounded-xl border-2 bg-gradient-to-br from-sam-surface/40 to-sam-surface/20 hover:from-sam-surface/50 hover:to-sam-surface/30 transition-all duration-300"
-            style={{
-              borderImage: 'linear-gradient(135deg, rgba(244, 114, 182, 0.3), rgba(139, 92, 246, 0.3), rgba(59, 130, 246, 0.3)) 1',
-            }}
-          >
-            {/* Gradient border effect */}
-            <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-pink-500/20 via-purple-500/20 to-blue-500/20 opacity-50 blur-sm -z-10" />
-
-            <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-              <div className="flex-1 text-center md:text-left">
-                <div className="flex items-center justify-center md:justify-start gap-2 mb-2">
-                  <Plus className="w-5 h-5 text-sam-accent" />
-                  <h3 className="text-xl font-display font-semibold text-sam-text">
-                    Add Your Own VM Provider
-                  </h3>
-                </div>
-                <p className="text-sm text-sam-text-dim font-body leading-relaxed mb-2">
-                  Have a preferred cloud provider? Our AI agents can build a native integration for your VM provider in minutes, seamlessly connecting it to ClawdBody.
-                </p>
-                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-sam-accent/10 border border-sam-accent/30">
-                  <span className="text-xs font-mono text-sam-accent">🚀 Marketplace Coming Soon</span>
-                </div>
-              </div>
-              <div className="flex-shrink-0">
-                <button
-                  disabled
-                  className="px-6 py-3 rounded-lg bg-gradient-to-r from-pink-500/20 via-purple-500/20 to-blue-500/20 border border-sam-border text-sam-text-dim font-medium hover:border-sam-accent/50 transition-all cursor-not-allowed opacity-60"
-                >
-                  Coming Soon
-                </button>
-              </div>
-            </div>
-          </motion.div>
+                      <p className="text-sm text-sam-text-dim font-body leading-relaxed mb-2">
+                        Have a preferred cloud provider? Our AI agents can build a native integration for your VM provider in minutes, seamlessly connecting it to ClawdBody.
+                      </p>
+                      <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-sam-accent/10 border border-sam-accent/30">
+                        <span className="text-xs font-mono text-sam-accent">🚀 Marketplace Coming Soon</span>
+                      </div>
+                    </div>
+                    <div className="flex-shrink-0">
+                      <button
+                        disabled
+                        className="px-6 py-3 rounded-lg bg-gradient-to-r from-pink-500/20 via-purple-500/20 to-blue-500/20 border border-sam-border text-sam-text-dim font-medium hover:border-sam-accent/50 transition-all cursor-not-allowed opacity-60"
+                      >
+                        Coming Soon
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </motion.div>
 
         {/* Terms Footer */}
@@ -2864,17 +3158,17 @@ export default function SelectVMPage() {
                           onChange={(e) => setAwsRegion(e.target.value)}
                           className="w-full px-4 py-2.5 rounded-lg bg-sam-bg border border-sam-border focus:border-sam-accent focus:ring-1 focus:ring-sam-accent/30 transition-all text-sam-text text-sm"
                         >
-                        {(awsRegions.length > 0 ? awsRegions : [
-                          { id: 'us-east-1', name: 'US East (N. Virginia)' },
-                          { id: 'us-west-2', name: 'US West (Oregon)' },
-                          { id: 'eu-west-1', name: 'Europe (Ireland)' },
-                          { id: 'ap-southeast-1', name: 'Asia Pacific (Singapore)' },
-                        ]).map((region) => (
-                          <option key={region.id} value={region.id}>
-                            {region.name}
-                          </option>
-                        ))}
-                      </select>
+                          {(awsRegions.length > 0 ? awsRegions : [
+                            { id: 'us-east-1', name: 'US East (N. Virginia)' },
+                            { id: 'us-west-2', name: 'US West (Oregon)' },
+                            { id: 'eu-west-1', name: 'Europe (Ireland)' },
+                            { id: 'ap-southeast-1', name: 'Asia Pacific (Singapore)' },
+                          ]).map((region) => (
+                            <option key={region.id} value={region.id}>
+                              {region.name}
+                            </option>
+                          ))}
+                        </select>
                       </div>
                     )}
 
@@ -4448,5 +4742,20 @@ export default function SelectVMPage() {
         )}
       </AnimatePresence>
     </div>
+  )
+}
+
+export default function SelectVMPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-sam-bg flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-2 border-sam-accent border-t-transparent rounded-full animate-spin" />
+          <p className="text-sam-text-dim font-mono text-sm">Loading...</p>
+        </div>
+      </div>
+    }>
+      <SelectVMContent />
+    </Suspense>
   )
 }
