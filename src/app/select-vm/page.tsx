@@ -413,11 +413,71 @@ function SelectVMContent() {
   const [showTemplateShareModal, setShowTemplateShareModal] = useState(false)
   const [templateToShare, setTemplateToShare] = useState<Template | null>(null)
 
+  // Check if user is first-time free and redirect to welcome page
+  useEffect(() => {
+    const checkFirstTimeFree = async () => {
+      if (!session?.user?.id) return
+      
+      // Skip if user is Pro
+      if ((session.user as any).isPro) return
+      
+      // Skip if coming from checkout
+      const proSignup = searchParams?.get('pro_signup')
+      if (proSignup) return
+      
+      try {
+        const response = await fetch('/api/user/first-time')
+        if (response.ok) {
+          const data = await response.json()
+          if (data.isFirstTimeFree) {
+            router.push('/welcome')
+            return
+          }
+        }
+      } catch (error) {
+        console.error('Error checking first-time status:', error)
+      }
+    }
+    
+    if (session?.user?.id) {
+      checkFirstTimeFree()
+    }
+  }, [session?.user?.id, searchParams, router])
+
   // Load user's VMs, credentials, and templates
   useEffect(() => {
     if (session?.user?.id) {
-      loadVMs()
-      loadTemplates()
+      // Skip if user is Pro (they might be redirected)
+      if ((session.user as any).isPro) {
+        loadVMs()
+        loadTemplates()
+        return
+      }
+      
+      // For free users, check if they're first-time before loading
+      // This prevents loading if they're about to be redirected
+      const checkAndLoad = async () => {
+        try {
+          const response = await fetch('/api/user/first-time')
+          if (response.ok) {
+            const data = await response.json()
+            if (!data.isFirstTimeFree) {
+              loadVMs()
+              loadTemplates()
+            }
+          } else {
+            // If check fails, load anyway
+            loadVMs()
+            loadTemplates()
+          }
+        } catch (error) {
+          // If check fails, load anyway
+          loadVMs()
+          loadTemplates()
+        }
+      }
+      
+      checkAndLoad()
     }
   }, [session?.user?.id])
 
