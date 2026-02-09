@@ -4,7 +4,7 @@ import { checkAllUserCredits } from '@/lib/credit-monitor'
 /**
  * Cron: check all Pro users' OpenRouter credit usage every 15 minutes.
  * Marks exhausted and sends notification (once per event).
- * Add to vercel.json: { "path": "/api/cron/check-credits", "schedule": "*/15 * * * *" }
+ * Add to vercel.json: { "path": "/api/cron/check-credits", "schedule": "0/15 * * * *" } (every 15 min)
  */
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get('authorization')

@@ -3,7 +3,7 @@
 import { useSession } from 'next-auth/react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { useEffect, useState, useRef } from 'react'
+import { Suspense, useEffect, useState, useRef } from 'react'
 import { ArrowLeft, CreditCard, Zap, AlertCircle, CheckCircle } from 'lucide-react'
 
 interface CreditStatus {
@@ -24,7 +24,7 @@ const PRESETS = [
   { label: '$50', cents: 5000 },
 ]
 
-export default function CreditsPage() {
+function CreditsPageContent() {
   const { data: session, status: authStatus } = useSession()
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -335,5 +335,19 @@ export default function CreditsPage() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function CreditsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-sam-bg flex items-center justify-center">
+          <span className="text-sam-text/70">Loading…</span>
+        </div>
+      }
+    >
+      <CreditsPageContent />
+    </Suspense>
   )
 }
