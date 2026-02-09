@@ -13,7 +13,7 @@ const AWS_CONFIG = {
 // System LLM API Key (from .env)
 const LLM_API_KEY = process.env.CLAWDBODY_ANTHROPIC_API_KEY!
 const LLM_PROVIDER = 'anthropic'
-const LLM_MODEL = 'claude-3-5-sonnet-20240620'
+const LLM_MODEL = 'claude-sonnet-4-5'
 
 interface DeployProVMParams {
     userId: string
