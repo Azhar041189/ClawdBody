@@ -151,7 +151,7 @@ export async function POST(request: NextRequest) {
     // Also force-update the model in clawdbot.json to ensure we use the free model if OpenRouter is selected
     // We use a small node script or sed to update the JSON safely
     const updateModelCmd = llmProvider === 'openrouter' 
-      ? `sed -i 's/"primary": ".*"/"primary": "google\\/gemini-2.0-flash-exp:free"/' ~/.clawdbot/clawdbot.json 2>/dev/null || true`
+      ? `sed -i 's/"primary": ".*"/"primary": "google\\/gemini-2.0-flash-001"/' ~/.clawdbot/clawdbot.json 2>/dev/null || true`
       : ''
 
     const wrappedCommand = `
