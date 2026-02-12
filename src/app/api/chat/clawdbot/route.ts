@@ -148,7 +148,14 @@ export async function POST(request: NextRequest) {
     const clawdbotCommand = `clawdbot agent --local --session-id "${chatSessionId}" --message "${escapedMessage}"`
     
     // Wrap command to source NVM and set API keys for the agent
+    // Also force-update the model in clawdbot.json to ensure we use the free model if OpenRouter is selected
+    // We use a small node script or sed to update the JSON safely
+    const updateModelCmd = llmProvider === 'openrouter' 
+      ? `sed -i 's/"primary": ".*"/"primary": "google\\/gemini-2.0-flash-exp:free"/' ~/.clawdbot/clawdbot.json 2>/dev/null || true`
+      : ''
+
     const wrappedCommand = `
+${updateModelCmd}
 source ~/.bashrc 2>/dev/null || true
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
