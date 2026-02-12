@@ -353,7 +353,7 @@ export function ClawdbotChat({ vmId, className = '', vmCreatedAt, onMigrate }: C
       // The environment variables (ANTHROPIC_API_KEY, MOONSHOT_API_KEY) are set in .bashrc
       // The environment variables (ANTHROPIC_API_KEY, MOONSHOT_API_KEY) are set in .bashrc
       // Force update model in clawdbot.json to ensure free model usage if OpenRouter is active
-      const updateModelCmd = `sed -i 's/"primary": ".*"/"primary": "google\\/gemini-2.0-flash-001"/' ~/.clawdbot/clawdbot.json 2>/dev/null || true`
+      const updateModelCmd = `sed -i 's/"primary": ".*"/"primary": "google\\/gemini-2.0-flash-exp:free"/' ~/.clawdbot/clawdbot.json 2>/dev/null || true`
       const command = `${updateModelCmd}; source ~/.bashrc 2>/dev/null; export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"; clawdbot agent --local --session-id "${chatSessionId}" --message "${escapedMessage}"; echo "${CLAWDBOT_END_MARKER}"`
 
       // Send the command

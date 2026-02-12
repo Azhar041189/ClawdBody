@@ -33,7 +33,7 @@ export const LLM_PROVIDERS: LLMProvider[] = [
     id: 'openrouter',
     name: 'OpenRouter (100+ models)',
     envVar: 'OPENROUTER_API_KEY',
-    defaultModel: 'openrouter/google/gemini-2.0-flash-001',  // Reliable default
+    defaultModel: 'openrouter/anthropic/claude-3.5-sonnet',  // Reliable default
     keyPrefix: ['sk-or-'],
     needsModelsProviders: false,  // Built-in! (was incorrectly true before)
   },
