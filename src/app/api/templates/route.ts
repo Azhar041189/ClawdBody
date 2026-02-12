@@ -4,6 +4,8 @@ import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { getAllTemplates, convertDbTemplate, TEMPLATE_IDEAS, type Template } from '@/lib/templates'
 
+export const dynamic = 'force-dynamic'
+
 /**
  * GET /api/templates - List all available templates
  * 

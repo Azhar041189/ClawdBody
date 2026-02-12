@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getTemplateById, convertDbTemplate, BUILTIN_TEMPLATES, type Template } from '@/lib/templates'
 
+export const dynamic = 'force-dynamic'
+
 interface TrendingTemplate {
   template: Template
   stats: {
